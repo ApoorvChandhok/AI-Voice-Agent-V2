@@ -1,63 +1,79 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import createGlobe from "cobe";
-import { useTheme } from "next-themes";
+import { useEffect, useRef, useState } from "react";
+import Globe from "react-globe.gl";
 
 export default function GlobeVisualization() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
+  const globeRef = useRef<any>();
+  const [dimensions, setDimensions] = useState({ width: 400, height: 400 });
+
+  const markers = [
+    { name: 'Delhi', lat: 28.6139, lng: 77.209, size: 0.5, color: 'white' },
+    { name: 'Mumbai', lat: 19.076, lng: 72.8777, size: 0.5, color: 'white' },
+    { name: 'New York', lat: 40.7128, lng: -74.006, size: 0.5, color: 'white' },
+    { name: 'London', lat: 51.5074, lng: -0.1278, size: 0.5, color: 'white' },
+    { name: 'Sydney', lat: -33.8688, lng: 151.2093, size: 0.5, color: 'white' },
+  ];
 
   useEffect(() => {
-    let phi = 0;
+    // Auto-rotate and color tinting
+    if (globeRef.current) {
+      globeRef.current.controls().autoRotate = true;
+      globeRef.current.controls().autoRotateSpeed = 0.5;
+      
+      // Safely apply the orange and brown theme if the method is available
+      setTimeout(() => {
+        if (globeRef.current && typeof globeRef.current.globeMaterial === 'function') {
+          const material = globeRef.current.globeMaterial();
+          if (material) {
+            material.color.set('#f97316'); // Orange continents
+            material.emissive.set('#4a2211'); // Dark brown ocean/base
+            material.emissiveIntensity = 0.8;
+            material.shininess = 0.2;
+          }
+        }
+      }, 500);
+    }
     
-    if (!canvasRef.current) return;
-
-    const width = canvasRef.current.offsetWidth;
-
-    const globe = createGlobe(canvasRef.current, {
-      devicePixelRatio: 2,
-      width: (width || 400) * 2,
-      height: (width || 400) * 2,
-      phi: 0,
-      theta: 0,
-      dark: isDark ? 1 : 0,
-      diffuse: 1.2,
-      mapSamples: 16000,
-      mapBrightness: 6,
-      baseColor: isDark ? [0.1, 0.1, 0.1] : [0.95, 0.95, 0.95],
-      markerColor: [0.18, 0.51, 0.97],
-      glowColor: isDark ? [0.1, 0.1, 0.2] : [0.8, 0.8, 1],
-      markers: [
-        { location: [28.6139, 77.209], size: 0.05 }, // Delhi
-        { location: [19.076, 72.8777], size: 0.05 }, // Mumbai
-        { location: [40.7128, -74.006], size: 0.08 }, // New York
-        { location: [51.5074, -0.1278], size: 0.06 }, // London
-      ],
-      onRender: (state) => {
-        state.phi = phi;
-        phi += 0.005;
-      },
-    });
-
-    return () => {
-      globe.destroy();
+    // Handle resize
+    const handleResize = () => {
+      const container = document.getElementById('globe-container');
+      if (container) {
+        setDimensions({
+          width: container.clientWidth,
+          height: container.clientHeight
+        });
+      }
     };
-  }, [isDark]);
+    
+    window.addEventListener('resize', handleResize);
+    // Initial size
+    setTimeout(handleResize, 100);
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center w-full h-full relative overflow-hidden bg-white dark:bg-[#0d1117] rounded-xl border border-gray-200 dark:border-[#30363d] shadow-sm transition-colors duration-200">
-      <div className="absolute top-5 left-5 z-10">
-         <h3 className="text-sm font-semibold text-gray-900 dark:text-[#e6edf3]">Global Presence</h3>
-         <p className="text-xs text-gray-500 dark:text-[#8b949e]">Live Caller Locations</p>
-      </div>
-      <div className="w-[300px] h-[300px] sm:w-[400px] sm:h-[400px] opacity-90 transition-opacity">
-        <canvas
-          ref={canvasRef}
-          style={{ width: "100%", height: "100%", contain: "layout paint size" }}
-        />
-      </div>
+    <div id="globe-container" className="flex items-center justify-center w-full h-full relative cursor-grab active:cursor-grabbing" style={{ minHeight: '300px' }}>
+      <Globe
+        ref={globeRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        globeImageUrl="//unpkg.com/three-globe/example/img/earth-water.png"
+        backgroundColor="rgba(0,0,0,0)"
+        showAtmosphere={false}
+        htmlElementsData={markers}
+        htmlElement={(d: any) => {
+          const el = document.createElement('div');
+          el.innerHTML = `
+            <div style="display: flex; flex-direction: column; items-center; justify-center; align-items: center; pointer-events: auto; cursor: pointer;">
+              <div style="width: 8px; height: 8px; background-color: white; border-radius: 50%; box-shadow: 0 0 10px white;"></div>
+              <div style="color: white; font-size: 10px; font-weight: bold; margin-top: 4px; text-shadow: 0px 0px 4px rgba(0,0,0,1); background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px;">${d.name}</div>
+            </div>
+          `;
+          return el;
+        }}
+      />
     </div>
   );
 }

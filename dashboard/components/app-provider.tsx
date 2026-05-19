@@ -3,18 +3,28 @@
 import * as React from "react";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 
-type Currency = "USD" | "INR" | "EUR" | "GBP";
+type Currency = "INR" | "USD" | "EUR" | "GBP";
 
-const currencyRates: Record<Currency, number> = {
-  USD: 1,
-  INR: 83.5,
-  EUR: 0.92,
-  GBP: 0.79,
+/**
+ * VoBiz stores costs in INR (the account's base currency).
+ * All costs in our system are stored as INR values.
+ * These rates convert FROM INR → target currency.
+ *
+ * Exchange rates as of May 19, 2026 (update periodically):
+ *   USD: 1 INR = 1/96.41 USD
+ *   EUR: 1 INR = 1/112.14 EUR
+ *   GBP: 1 INR = 1/129.19 GBP
+ */
+const INR_TO_CURRENCY: Record<Currency, number> = {
+  INR: 1,
+  USD: 1 / 96.41,   // 1 USD = ₹96.41
+  EUR: 1 / 112.14,  // 1 EUR = ₹112.14
+  GBP: 1 / 129.19,  // 1 GBP = ₹129.19
 };
 
 const currencySymbols: Record<Currency, string> = {
-  USD: "$",
   INR: "₹",
+  USD: "$",
   EUR: "€",
   GBP: "£",
 };
@@ -22,17 +32,21 @@ const currencySymbols: Record<Currency, string> = {
 interface AppContextType {
   currency: Currency;
   setCurrency: (c: Currency) => void;
-  formatCurrency: (amountInUsd: number) => string;
+  /**
+   * Formats an amount stored in INR into the selected display currency.
+   * Pass the raw cost value exactly as returned by VoBiz (already in INR).
+   */
+  formatCurrency: (amountInINR: number) => string;
 }
 
 export const AppContext = React.createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [currency, setCurrency] = React.useState<Currency>("USD");
+  const [currency, setCurrency] = React.useState<Currency>("INR");
 
   React.useEffect(() => {
     const saved = localStorage.getItem("app-currency") as Currency;
-    if (saved && currencyRates[saved]) {
+    if (saved && INR_TO_CURRENCY[saved] !== undefined) {
       setCurrency(saved);
     }
   }, []);
@@ -42,9 +56,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("app-currency", c);
   };
 
-  const formatCurrency = (amountInUsd: number) => {
-    const converted = amountInUsd * currencyRates[currency];
-    return `${currencySymbols[currency]}${converted.toFixed(3)}`;
+  const formatCurrency = (amountInINR: number) => {
+    const converted = amountInINR * INR_TO_CURRENCY[currency];
+    // Show 2 decimal places for most currencies, but INR often needs 2 as well
+    return `${currencySymbols[currency]}${converted.toFixed(2)}`;
   };
 
   return (

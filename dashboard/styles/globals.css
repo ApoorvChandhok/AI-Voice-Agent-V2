@@ -67,3 +67,17 @@ input[type="search"]::-webkit-search-cancel-button {
 .recharts-surface path {
     outline: none;
 }
+
+/* Light-mode Recharts tooltip fix — prevent dark bg bleed */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+    background-color: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    color: #111827 !important;
+}
+
+.dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+    background-color: #161b22 !important;
+    border-color: #30363d !important;
+    color: #e6edf3 !important;
+}

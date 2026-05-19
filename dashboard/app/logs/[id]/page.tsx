@@ -7,19 +7,19 @@ import CustomAudioPlayer from "@/components/CustomAudioPlayer";
 import TranscriptViewer from "@/components/TranscriptViewer";
 
 const AGENT_DID = "918065480288";
-const USD_TO_INR = 95;
+
+// VoBiz total_cost is already in INR — format directly, no conversion needed
+function formatCostINR(cost: string | number | undefined): string {
+  if (cost == null) return "₹0.00";
+  const inr = typeof cost === "number" ? cost : (parseFloat(cost.replace(/[^0-9.-]/g, "")) || 0);
+  return `₹${inr.toFixed(2)}`;
+}
 
 function getCallerNumber(log: any): string {
   if (log.caller_number) return log.caller_number;
   if (log.caller_id && log.caller_id.replace("+", "") !== AGENT_DID) return log.caller_id;
   if (log.phone_number && log.phone_number.replace("+", "") !== AGENT_DID) return log.phone_number;
   return log.phone_number || "Unknown";
-}
-
-function costToINR(cost: string | undefined): string {
-  if (!cost) return "₹0.00";
-  const usd = parseFloat(cost.replace("$", "")) || 0;
-  return `₹${(usd * USD_TO_INR).toFixed(2)}`;
 }
 
 export default async function SingleCallPage({ params }: { params: Promise<{ id: string }> }) {
@@ -97,7 +97,7 @@ export default async function SingleCallPage({ params }: { params: Promise<{ id:
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-[#8b949e] uppercase font-semibold tracking-wider mb-1">Cost</p>
-                  <p className="font-medium text-gray-900 dark:text-[#e6edf3] font-mono">{costToINR(log.cost)}</p>
+                  <p className="font-medium text-gray-900 dark:text-[#e6edf3] font-mono">{formatCostINR(log.cost)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-[#8b949e] uppercase font-semibold tracking-wider mb-1">Timestamp</p>

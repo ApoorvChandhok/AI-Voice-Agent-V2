@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Phone, MessageSquare, Loader2, Sparkles, Server } from 'lucide-react';
+import { Phone, Loader2 } from 'lucide-react';
 
 export default function CallDispatcher() {
     const [phoneNumber, setPhoneNumber] = useState('');
@@ -40,49 +40,51 @@ export default function CallDispatcher() {
         }
     };
 
+    const inputClass = "w-full px-3 py-2.5 bg-gray-50 dark:bg-[#0d1117] border border-gray-200 dark:border-[#30363d] rounded-lg focus:ring-1 focus:ring-blue-500 dark:focus:ring-[#2f81f7] focus:border-blue-500 dark:focus:border-[#2f81f7] text-gray-900 dark:text-[#e6edf3] placeholder-gray-400 dark:placeholder-[#8b949e] outline-none transition-all text-sm";
+
     return (
         <div className="w-full">
             <div className="p-8">
-                <div className="flex items-center justify-between mb-8 pb-4 border-b border-[#30363d]">
+                <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-200 dark:border-[#30363d]">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-[#2f81f7]/10 text-[#2f81f7] rounded-lg">
+                        <div className="p-2 bg-blue-50 dark:bg-[#2f81f7]/10 text-blue-600 dark:text-[#2f81f7] rounded-lg">
                             <Phone className="w-5 h-5" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-semibold text-[#e6edf3]">Manual Dial</h2>
-                            <p className="text-sm text-[#8b949e]">Deploy an agent to a specific number</p>
+                            <h2 className="text-lg font-semibold text-gray-900 dark:text-[#e6edf3]">Manual Dial</h2>
+                            <p className="text-sm text-gray-500 dark:text-[#8b949e]">Deploy an agent to a specific number</p>
                         </div>
                     </div>
                 </div>
 
                 <form onSubmit={handleDispatch} className="space-y-5">
                     <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-[#e6edf3]">Phone Number</label>
+                        <label className="text-sm font-medium text-gray-700 dark:text-[#e6edf3]">Phone Number</label>
                         <input
                             type="tel"
                             placeholder="+919876543210"
                             required
                             value={phoneNumber}
                             onChange={(e) => setPhoneNumber(e.target.value)}
-                            className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-[#e6edf3] placeholder-[#8b949e] outline-none transition-all text-sm"
+                            className={inputClass}
                         />
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-[#e6edf3]">Context / Prompt</label>
+                        <label className="text-sm font-medium text-gray-700 dark:text-[#e6edf3]">Context / Prompt</label>
                         <textarea
                             placeholder="e.g. You are calling regarding a coffee order..."
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
-                            className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-[#e6edf3] placeholder-[#8b949e] outline-none transition-all h-24 resize-none text-sm"
+                            className={`${inputClass} h-24 resize-none`}
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-[#e6edf3]">Model provider</label>
+                            <label className="text-sm font-medium text-gray-700 dark:text-[#e6edf3]">Model provider</label>
                             <select
-                                className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] outline-none focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-sm"
+                                className={inputClass}
                                 name="modelProvider"
                                 defaultValue="groq"
                             >
@@ -91,9 +93,9 @@ export default function CallDispatcher() {
                             </select>
                         </div>
                         <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-[#e6edf3]">Voice</label>
+                            <label className="text-sm font-medium text-gray-700 dark:text-[#e6edf3]">Voice</label>
                             <select
-                                className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] outline-none focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-sm"
+                                className={inputClass}
                                 name="voice"
                                 defaultValue="alloy"
                             >
@@ -109,7 +111,7 @@ export default function CallDispatcher() {
                     <button
                         type="submit"
                         disabled={status === 'loading'}
-                        className="w-full py-2.5 px-4 bg-[#2f81f7] hover:bg-[#1a6de8] text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        className="w-full py-2.5 px-4 bg-blue-500 dark:bg-[#2f81f7] hover:bg-blue-600 dark:hover:bg-[#1a6de8] text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     >
                         {status === 'loading' ? (
                             <>
@@ -121,7 +123,11 @@ export default function CallDispatcher() {
                     </button>
 
                     {message && (
-                        <div className={`p-3 rounded-lg text-sm flex items-center gap-2 border ${status === 'success' ? 'bg-[#2ea043]/10 text-[#2ea043] border-[#2ea043]/20' : 'bg-[#da3633]/10 text-[#da3633] border-[#da3633]/20'}`}>
+                        <div className={`p-3 rounded-lg text-sm flex items-center gap-2 border ${
+                            status === 'success'
+                                ? 'bg-green-50 dark:bg-[#2ea043]/10 text-green-700 dark:text-[#2ea043] border-green-200 dark:border-[#2ea043]/20'
+                                : 'bg-red-50 dark:bg-[#da3633]/10 text-red-700 dark:text-[#da3633] border-red-200 dark:border-[#da3633]/20'
+                        }`}>
                             {message}
                         </div>
                     )}

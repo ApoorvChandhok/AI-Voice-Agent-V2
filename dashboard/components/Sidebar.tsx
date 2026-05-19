@@ -4,7 +4,7 @@ import React from "react";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, PhoneOutgoing, Activity, Users, Settings, Database, Moon, Sun, DollarSign } from "lucide-react";
+import { LayoutDashboard, PhoneOutgoing, Activity, Users, Settings, Database, Moon, Sun, DollarSign, Wallet } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAppContext } from "./app-provider";
 
@@ -23,6 +23,7 @@ export default function Sidebar() {
     { name: "Outbound Dialer", path: "/dialer", icon: PhoneOutgoing },
     { name: "Call Logs", path: "/logs", icon: Activity },
     { name: "Leads / CRM", path: "/leads", icon: Users },
+    { name: "Wallet", path: "/wallet", icon: Wallet },
   ];
 
   const currentTheme = mounted ? resolvedTheme : 'light';
@@ -64,10 +65,10 @@ export default function Sidebar() {
           <select 
             value={currency}
             onChange={(e) => setCurrency(e.target.value as any)}
-            className="bg-transparent outline-none flex-1 cursor-pointer"
+          className="bg-transparent outline-none flex-1 cursor-pointer text-gray-600 dark:text-[#8b949e]"
           >
-            <option value="USD">USD ($)</option>
             <option value="INR">INR (₹)</option>
+            <option value="USD">USD ($)</option>
             <option value="EUR">EUR (€)</option>
             <option value="GBP">GBP (£)</option>
           </select>
