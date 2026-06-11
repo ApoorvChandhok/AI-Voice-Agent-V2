@@ -151,21 +151,18 @@ input[type="search"]::-webkit-search-cancel-button {
   50% { opacity: 0.8; }
 }
 
-/* — Glassmorphism card base — */
+/* — Premium Solid Card Base (formerly Glassmorphism) — */
 .glass-card {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dark .glass-card {
-  background: rgba(15, 20, 35, 0.4);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1A1A1A;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
 }
 
@@ -177,11 +174,9 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .dark .glass-card:hover {
-  background: rgba(20, 25, 45, 0.55);
-  border-color: rgba(99, 102, 241, 0.3);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(99, 102, 241, 0.15);
+  background: #1E1E1E;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   transform: translateY(-2px);
 }
 
@@ -194,10 +189,10 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .dark .glass-sidebar {
-  background: rgba(5, 5, 15, 0.4);
+  background: rgba(13, 17, 23, 0.85); /* #0d1117 */
   backdrop-filter: blur(32px) saturate(200%);
   -webkit-backdrop-filter: blur(32px) saturate(200%);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(48, 54, 61, 0.5); /* #30363d */
 }
 
 /* — Glassmorphic header — */
@@ -209,24 +204,24 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .dark .glass-header {
-  background: rgba(5, 5, 15, 0.4);
+  background: rgba(13, 17, 23, 0.85);
   backdrop-filter: blur(32px) saturate(200%);
   -webkit-backdrop-filter: blur(32px) saturate(200%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
 }
 
 /* — Premium Mesh Backgrounds — */
-.premium-bg {
-  background-color: #030014;
+@utility premium-bg {
+  background-color: #0d1117;
   background-image: 
-    radial-gradient(at 0% 0%, rgba(40, 20, 80, 0.5) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(20, 10, 50, 0.4) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(50, 20, 100, 0.3) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, rgba(15, 10, 40, 0.6) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(30, 20, 60, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(20, 10, 40, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(40, 20, 80, 0.05) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, rgba(10, 5, 20, 0.1) 0px, transparent 50%);
   background-attachment: fixed;
 }
 
-.light-premium-bg {
+@utility light-premium-bg {
   background-color: #f8fafc;
   background-image: 
     radial-gradient(at 0% 0%, rgba(224, 231, 255, 0.7) 0px, transparent 50%),

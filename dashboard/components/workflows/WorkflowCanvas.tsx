@@ -18,64 +18,70 @@ interface Props {
   nodeValidations?: Record<string, NodeValidationResult>;
 }
 
-// ── SVG Edge Rendering ───────────────────────────────────────────────────────
+// ── TB Layout Constants ──────────────────────────────────────────────────────
+const NODE_WIDTH = 240;
+const NODE_HEIGHT = 85; // Approximate card height
+const PORT_RADIUS = 5;  // 10px diameter / 2
 
-const NODE_WIDTH = 260;
-const NODE_HEADER_HEIGHT = 85; // approx card total height
-const PORT_OFFSET_Y_TOP = 0;
-const PORT_OFFSET_Y_BOTTOM = NODE_HEADER_HEIGHT;
+// ── Port Position Helpers (TB layout) ────────────────────────────────────────
 
 function getSourcePortPosition(
   node: WorkflowNode,
   port: string | undefined
 ): { x: number; y: number } {
-  const baseX = node.position.x;
-  const baseY = node.position.y;
+  const baseX = node.position.x + NODE_WIDTH / 2; // Center horizontally
+  const baseY = node.position.y + NODE_HEIGHT + PORT_RADIUS - 5; // Bottom edge of node, accounting for negative margins
 
   if (node.category === "condition") {
     if (port === "yes") {
-      return { x: baseX + 32, y: baseY + PORT_OFFSET_Y_BOTTOM + 10 };
+      return { x: baseX - 24, y: baseY }; // Left port — matches gap-12 (48px total / 2)
     }
     if (port === "no") {
-      return { x: baseX + NODE_WIDTH - 32, y: baseY + PORT_OFFSET_Y_BOTTOM + 10 };
+      return { x: baseX + 24, y: baseY }; // Right port — matches gap-12
     }
   }
-  return { x: baseX + NODE_WIDTH / 2, y: baseY + PORT_OFFSET_Y_BOTTOM + 10 };
+  return { x: baseX, y: baseY };
 }
 
 function getTargetPortPosition(node: WorkflowNode): { x: number; y: number } {
   return {
-    x: node.position.x + NODE_WIDTH / 2,
-    y: node.position.y + PORT_OFFSET_Y_TOP - 4,
+    x: node.position.x + NODE_WIDTH / 2, // Center horizontally
+    y: node.position.y - PORT_RADIUS + 5, // Top edge of node, accounting for negative margins
   };
 }
 
-function EdgePath({
+// ── SVG Edge Rendering ───────────────────────────────────────────────────────
+
+const EdgePath = React.memo(function EdgePath({
   edge,
-  nodes,
+  sourceNode,
+  targetNode,
   onDelete,
 }: {
   edge: WorkflowEdge;
-  nodes: WorkflowNode[];
+  sourceNode?: WorkflowNode;
+  targetNode?: WorkflowNode;
   onDelete: (id: string) => void;
 }) {
-  const sourceNode = nodes.find((n) => n.id === edge.sourceId);
-  const targetNode = nodes.find((n) => n.id === edge.targetId);
   if (!sourceNode || !targetNode) return null;
 
   const start = getSourcePortPosition(sourceNode, edge.sourcePort);
   const end = getTargetPortPosition(targetNode);
 
-  // Calculate control points for a smooth bezier curve
+  // Vertical bezier curve (TB flow)
   const deltaY = end.y - start.y;
-  const cpOffset = Math.max(50, Math.abs(deltaY) * 0.4);
+  
+  // Smarter control point offset to prevent massive loops when nodes are placed horizontally
+  const cpOffset = deltaY > 0 
+    ? Math.max(60, deltaY * 0.4) 
+    : Math.max(30, Math.abs(deltaY) * 0.15);
 
   const path = `M ${start.x} ${start.y} C ${start.x} ${start.y + cpOffset}, ${end.x} ${end.y - cpOffset}, ${end.x} ${end.y}`;
 
   // Edge color based on label
   let strokeColor = "#4b5563";
-  if (edge.label === "Yes" || edge.sourcePort === "yes") strokeColor = "#34d399";
-  if (edge.label === "No" || edge.sourcePort === "no") strokeColor = "#f87171";
+  if (edge.label === "Yes" || edge.sourcePort === "yes") strokeColor = "#3fb950";
+  if (edge.label === "No" || edge.sourcePort === "no") strokeColor = "#f85149";
 
   const midX = (start.x + end.x) / 2;
   const midY = (start.y + end.y) / 2;
@@ -100,15 +106,15 @@ function EdgePath({
         fill="none"
         stroke={strokeColor}
         strokeWidth={2}
-        strokeDasharray={edge.label ? "none" : "none"}
-        className="transition-all duration-200 pointer-events-none"
+        strokeDasharray="none"
+        className="transition-colors duration-200 pointer-events-none"
         opacity={0.6}
       />
       {/* Animated dot */}
       <circle r="3" fill={strokeColor} opacity={0.8}>
         <animateMotion dur="3s" repeatCount="indefinite" path={path} />
       </circle>
-      {/* Arrow at end */}
+      {/* Arrow at end (pointing down) */}
       <polygon
         points={`${end.x},${end.y} ${end.x - 5},${end.y - 8} ${end.x + 5},${end.y - 8}`}
         fill={strokeColor}
@@ -141,7 +147,7 @@ function EdgePath({
       )}
     </g>
   );
-}
+});
 
 // ── Connection Line (while dragging) ─────────────────────────────────────────
 
@@ -152,8 +158,12 @@ function ConnectionLine({
   start: { x: number; y: number };
   end: { x: number; y: number };
 }) {
-  const cpOffset = Math.max(50, Math.abs(end.y - start.y) * 0.4);
-  const path = `M ${start.x} ${start.y} C ${start.x} ${start.y + cpOffset}, ${end.x} ${end.y - cpOffset}, ${end.x} ${end.y}`;
+  const deltaX = end.x - start.x;
+  const cpOffset = deltaX > 0 
+    ? Math.max(60, deltaX * 0.4) 
+    : Math.max(30, Math.abs(deltaX) * 0.15);
+  
+  const path = `M ${start.x} ${start.y} C ${start.x + cpOffset} ${start.y}, ${end.x - cpOffset} ${end.y}, ${end.x} ${end.y}`;
 
   return (
     <path
@@ -186,6 +196,7 @@ export default function WorkflowCanvas({
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+  const hasFitRef = useRef(false);
 
   // Dragging nodes
   const [dragNodeId, setDragNodeId] = useState<string | null>(null);
@@ -225,7 +236,7 @@ export default function WorkflowCanvas({
         const dy = (e.clientY - dragStart.current.y) / zoom;
         onMoveNode(dragNodeId, {
           x: Math.max(0, dragStart.current.nodeX + dx),
-          y: Math.max(0, dragStart.current.nodeY + dy),
+          y: Math.max(-500, dragStart.current.nodeY + dy), // allow moving up to -500 (pan up to reach it)
         });
       } else if (isPanning) {
         const dx = e.clientX - panStart.current.x;
@@ -256,13 +267,13 @@ export default function WorkflowCanvas({
         setIsPanning(false);
       }
       if (connectionStart) {
-        // Check if we're over a node's input port
+        // Check if we're over a node's input port (LEFT side for LR layout)
         const rect = canvasRef.current?.getBoundingClientRect();
         if (rect) {
           const mouseX = (e.clientX - rect.left - panOffset.x) / zoom;
           const mouseY = (e.clientY - rect.top - panOffset.y) / zoom;
 
-          // Find if mouse is over any node's input area (top area)
+          // Find if mouse is over any node's input area (left side)
           const targetNode = nodes.find((n) => {
             if (n.id === connectionStart.nodeId) return false;
             if (n.category === "trigger") return false; // can't connect TO a trigger
@@ -272,7 +283,7 @@ export default function WorkflowCanvas({
               mouseX >= nx - 20 &&
               mouseX <= nx + NODE_WIDTH + 20 &&
               mouseY >= ny - 20 &&
-              mouseY <= ny + NODE_HEADER_HEIGHT + 20
+              mouseY <= ny + NODE_HEIGHT + 20
             );
           });
 
@@ -314,26 +325,42 @@ export default function WorkflowCanvas({
     [panOffset, onSelectNode]
   );
 
-  // ── Scroll lock: prevent page scroll when mouse is over canvas ────────────
+  // ── Canvas Zoom (Zoom to Mouse) ──────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const blockScroll = (e: WheelEvent) => {
+
+    const handleWheel = (e: WheelEvent) => {
+      // Allow scrolling if Ctrl/Cmd is not pressed? Usually canvas always zooms on scroll.
+      // We will prevent default to stop page scroll.
       e.preventDefault();
       e.stopPropagation();
-      setZoom((prev) => {
+
+      const rect = canvas.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+
+      setZoom((prevZoom) => {
+        // Use a slightly smoother delta
         const delta = e.deltaY > 0 ? -0.05 : 0.05;
-        return Math.min(2, Math.max(0.3, prev + delta));
+        // Optional: you can scale delta based on prevZoom for more natural feeling
+        const zoomDelta = prevZoom * delta * 2; 
+        const newZoom = Math.min(2, Math.max(0.3, prevZoom + (Math.abs(zoomDelta) < 0.05 ? delta : zoomDelta)));
+        
+        if (newZoom !== prevZoom) {
+          setPanOffset((prevPan) => ({
+            x: cursorX - (cursorX - prevPan.x) * (newZoom / prevZoom),
+            y: cursorY - (cursorY - prevPan.y) * (newZoom / prevZoom),
+          }));
+        }
+        return newZoom;
       });
     };
-    const onEnter = () => canvas.addEventListener("wheel", blockScroll, { passive: false });
-    const onLeave = () => canvas.removeEventListener("wheel", blockScroll);
-    canvas.addEventListener("mouseenter", onEnter);
-    canvas.addEventListener("mouseleave", onLeave);
+
+    // Attach wheel event directly. It only fires when mouse is over the element anyway.
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
-      canvas.removeEventListener("mouseenter", onEnter);
-      canvas.removeEventListener("mouseleave", onLeave);
-      canvas.removeEventListener("wheel", blockScroll);
+      canvas.removeEventListener("wheel", handleWheel);
     };
   }, []);
 
@@ -349,8 +376,6 @@ export default function WorkflowCanvas({
 
       if (portId && portType && (portType.startsWith("output"))) {
         e.stopPropagation();
-        const nodeId = portId.split("-")[0];
-        // Reconstruct node id properly (may contain underscores)
         const parts = portId.split("-");
         const port = parts[parts.length - 1]; // "output", "yes", "no"
         const nId = parts.slice(0, -1).join("-");
@@ -377,9 +402,39 @@ export default function WorkflowCanvas({
     return () => canvas.removeEventListener("mousedown", handlePortClick, true);
   }, [nodes]);
 
+  // ── Fit View on load ────────────────────────────────────────────
+  useEffect(() => {
+    if (nodes.length === 0 || hasFitRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    hasFitRef.current = true;
+    const canvasW = canvas.clientWidth;
+    const canvasH = canvas.clientHeight;
+
+    const minX = Math.min(...nodes.map((n) => n.position.x));
+    const minY = Math.min(...nodes.map((n) => n.position.y));
+    const maxX = Math.max(...nodes.map((n) => n.position.x + NODE_WIDTH));
+    const maxY = Math.max(...nodes.map((n) => n.position.y + NODE_HEIGHT));
+
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
+
+    const padding = 80;
+    const scaleX = (canvasW - padding * 2) / contentW;
+    const scaleY = (canvasH - padding * 2) / contentH;
+    const newZoom = Math.min(1, Math.min(scaleX, scaleY)); // never zoom in beyond 100%
+
+    const offsetX = (canvasW - contentW * newZoom) / 2 - minX * newZoom;
+    const offsetY = padding - minY * newZoom;
+
+    setZoom(newZoom);
+    setPanOffset({ x: offsetX, y: offsetY });
+  }, [nodes]);
+
   // Calculate SVG canvas bounds
-  const maxX = Math.max(1200, ...nodes.map((n) => n.position.x + NODE_WIDTH + 100));
-  const maxY = Math.max(800, ...nodes.map((n) => n.position.y + NODE_HEADER_HEIGHT + 200));
+  const maxX = Math.max(3200, ...nodes.map((n) => n.position.x + NODE_WIDTH + 600));
+  const maxY = Math.max(2400, ...nodes.map((n) => n.position.y + NODE_HEIGHT + 600));
 
   return (
     <div
@@ -434,7 +489,7 @@ export default function WorkflowCanvas({
       <div
         id="transform-container"
         style={{
-          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+          transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoom})`,
           transformOrigin: "0 0",
           position: "absolute",
           top: 0,
@@ -451,7 +506,7 @@ export default function WorkflowCanvas({
           style={{ overflow: "visible" }}
         >
           <defs>
-            <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="#818cf8" stopOpacity="0.6" />
               <stop offset="100%" stopColor="#818cf8" stopOpacity="0.2" />
             </linearGradient>
@@ -461,7 +516,8 @@ export default function WorkflowCanvas({
               <EdgePath
                 key={edge.id}
                 edge={edge}
-                nodes={nodes}
+                sourceNode={nodes.find((n) => n.id === edge.sourceId)}
+                targetNode={nodes.find((n) => n.id === edge.targetId)}
                 onDelete={onDeleteEdge}
               />
             ))}

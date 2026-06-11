@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Phone, Loader2 } from 'lucide-react';
 
 export default function CallDispatcher() {
@@ -8,6 +8,23 @@ export default function CallDispatcher() {
     const [prompt, setPrompt] = useState('');
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');
+    
+    // Add state for dynamic defaults
+    const [defaultModel, setDefaultModel] = useState('groq');
+    const [defaultVoice, setDefaultVoice] = useState('alloy');
+    
+    // Fetch defaults from config
+    useEffect(() => {
+        fetch('/api/agent-config?mode=outbound')
+            .then(res => res.json())
+            .then(data => {
+                if (data?.config) {
+                    if (data.config.llm_provider) setDefaultModel(data.config.llm_provider);
+                    if (data.config.tts_voice) setDefaultVoice(data.config.tts_voice);
+                }
+            })
+            .catch(console.error);
+    }, []);
 
     const handleDispatch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -86,7 +103,8 @@ export default function CallDispatcher() {
                             <select
                                 className={inputClass}
                                 name="modelProvider"
-                                defaultValue="groq"
+                                value={defaultModel}
+                                onChange={(e) => setDefaultModel(e.target.value)}
                             >
                                 <option value="openai">OpenAI (GPT-4o)</option>
                                 <option value="groq">Groq (Llama 3)</option>
@@ -97,13 +115,16 @@ export default function CallDispatcher() {
                             <select
                                 className={inputClass}
                                 name="voice"
-                                defaultValue="alloy"
+                                value={defaultVoice}
+                                onChange={(e) => setDefaultVoice(e.target.value)}
                             >
                                 <option value="alloy">Alloy (US)</option>
                                 <option value="echo">Echo (US)</option>
                                 <option value="shimmer">Shimmer (US)</option>
                                 <option value="anushka">Anushka (IN)</option>
                                 <option value="aravind">Aravind (IN)</option>
+                                <option value="f786b574-daa5-4673-aa0c-cbe3e8534c02">Default Voice (Cartesia)</option>
+                                <option value="aura-asteria-en">Asteria (Deepgram)</option>
                             </select>
                         </div>
                     </div>

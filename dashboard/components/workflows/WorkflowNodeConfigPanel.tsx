@@ -1,15 +1,233 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
-import { X, Info, Plus, Trash2, Pin, PinOff, ChevronDown, ChevronUp, Copy, Check, AlertCircle, Code2 } from "lucide-react";
+import React, { useState, useCallback, useRef } from "react";
+import { X, Info, Plus, Trash2, Pin, PinOff, ChevronDown, ChevronUp, Copy, Check, AlertCircle, Code2, Zap, Loader2, Edit2, Save } from "lucide-react";
 import type { WorkflowNode, SwitchRule } from "@/lib/workflow-types";
 import { getNodeMetadata } from "@/lib/workflow-types";
+
+// -- Drag Context --------------------------------------------------------------
+export const DragCtx = React.createContext<{
+  draggedPath: string | null;
+  setDraggedPath: (val: string | null) => void;
+}>({ draggedPath: null, setDraggedPath: () => {} });
+
+function insertAtCaret(input: HTMLInputElement | HTMLTextAreaElement, text: string) {
+  const start = input.selectionStart || 0;
+  const end = input.selectionEnd || 0;
+  const val = input.value;
+  return val.slice(0, start) + text + val.slice(end);
+}
+
+// -- Schema View (draggable field tree) ---------------------------------------
+function SchemaView({ data, path = "$json", showTypes = false }: { data: any; path?: string; showTypes?: boolean }) {
+  const { setDraggedPath } = React.useContext(DragCtx);
+
+  if (data === null || data === undefined) return <span className="text-gray-500 italic text-[10px]">null</span>;
+  if (typeof data !== "object") {
+    if (showTypes) return <span className="text-[#6e7681] text-[10px] italic">{typeof data}</span>;
+    return <span className="text-[#2f81f7] text-[10px]">{String(data)}</span>;
+  }
+
+  return (
+    <div className="pl-3 border-l border-[#30363d] ml-1 mt-0.5">
+      {Object.entries(data).map(([key, val]) => {
+        const fullPath = Array.isArray(data) ? `${path}[${key}]` : `${path}.${key}`;
+        const isPrimitive = val === null || typeof val !== "object";
+        const typeLabel = val === null ? "null" : Array.isArray(val) ? `array[${(val as any[]).length}]` : typeof val;
+
+        return (
+          <div key={key} className="py-[2px]">
+            <div
+              draggable={isPrimitive}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("text/plain", `{{${fullPath}}}`);
+                setDraggedPath(fullPath);
+              }}
+              onDragEnd={() => setDraggedPath(null)}
+              className={`flex items-center gap-1.5 font-mono text-[11px] leading-relaxed rounded ${isPrimitive ? "cursor-grab active:cursor-grabbing hover:bg-[#2f81f7]/10 px-1 -mx-1 group transition-colors" : ""}`}
+            >
+              {/* Type chip */}
+              <span className="text-[9px] font-bold px-1 py-[1px] rounded bg-[#21262d] text-[#8b949e] border border-[#30363d] shrink-0">
+                {val === null ? "null" : Array.isArray(val) ? "[]" : typeof val === "object" ? "{}" : typeof val === "number" ? "123" : typeof val === "boolean" ? "T/F" : "T"}
+              </span>
+              <span className="text-[#c9d1d9] font-semibold shrink-0">{key}</span>
+              {isPrimitive && !showTypes && (
+                <span className="text-[#8b949e] truncate group-hover:text-[#2f81f7] transition-colors text-[10px]">
+                  {val === null ? "null" : String(val).substring(0, 40)}
+                </span>
+              )}
+              {isPrimitive && showTypes && (
+                <span className="text-[#6e7681] italic text-[10px]">{typeof val}</span>
+              )}
+              {!isPrimitive && (
+                <span className="text-[#6e7681] text-[10px]">{typeLabel}</span>
+              )}
+            </div>
+            {!isPrimitive && (
+              <SchemaView data={val} path={fullPath} showTypes={showTypes} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// -- Table View ----------------------------------------------------------------
+function TableView({ data }: { data: any }) {
+  const rows: any[] = Array.isArray(data) ? data : [data];
+  const allKeys = Array.from(new Set(rows.flatMap(r => typeof r === "object" && r !== null ? Object.keys(r) : [])));
+
+  if (allKeys.length === 0) return (
+    <div className="text-xs text-[#8b949e] p-4 text-center">No tabular data</div>
+  );
+
+  return (
+    <div className="overflow-auto h-full">
+      <table className="w-full text-[11px] font-mono border-collapse">
+        <thead className="sticky top-0 bg-[#161b22] z-10">
+          <tr>
+            <th className="text-left text-[#8b949e] px-2 py-1.5 border-b border-[#30363d] font-semibold w-8">#</th>
+            {allKeys.map(k => (
+              <th key={k} className="text-left text-[#e6edf3] px-2 py-1.5 border-b border-[#30363d] font-semibold whitespace-nowrap">{k}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-b border-[#21262d] hover:bg-[#21262d]/50 transition-colors">
+              <td className="px-2 py-1.5 text-[#6e7681]">{i + 1}</td>
+              {allKeys.map(k => {
+                const cell = row?.[k];
+                const isObj = cell !== null && typeof cell === "object";
+                return (
+                  <td key={k} className="px-2 py-1.5 max-w-[200px]">
+                    {isObj
+                      ? <span className="text-[#6e7681] italic">{Array.isArray(cell) ? `[${cell.length}]` : "{...}"}</span>
+                      : cell === null || cell === undefined
+                        ? <span className="text-[#6e7681] italic">null</span>
+                        : <span className="text-[#c9d1d9] truncate block">{String(cell)}</span>
+                    }
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// -- Data View Tabs ------------------------------------------------------------
+function DataViewTabs({
+  data,
+  defaultMsg,
+  onExecute,
+  isRunning,
+  nodeOutputMap,
+  currentNodeId,
+}: {
+  data: any;
+  defaultMsg: string;
+  onExecute?: () => void;
+  isRunning?: boolean;
+  nodeOutputMap?: Record<string, { label: string; data: any }>;
+  currentNodeId?: string;
+}) {
+  const [view, setView] = React.useState<"schema" | "table" | "json">("schema");
+  const [selectedSource, setSelectedSource] = React.useState<string>("__current__");
+
+  const sources = nodeOutputMap ? Object.entries(nodeOutputMap).filter(([id]) => id !== currentNodeId) : [];
+  const activeData = selectedSource === "__current__" ? data : (nodeOutputMap?.[selectedSource]?.data ?? null);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Source selector */}
+      {sources.length > 0 && (
+        <div className="px-2 pt-2">
+          <select
+            value={selectedSource}
+            onChange={e => setSelectedSource(e.target.value)}
+            className="w-full text-[10px] bg-[#21262d] border border-[#30363d] rounded px-2 py-1 text-[#c9d1d9] focus:outline-none focus:border-[#2f81f7]"
+          >
+            <option value="__current__">Current node input</option>
+            {sources.map(([id, info]) => (
+              <option key={id} value={id}>{info.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* View tabs */}
+      <div className="flex items-center gap-0.5 px-2 pt-2 pb-1">
+        {(["schema", "table", "json"] as const).map(v => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-2.5 py-1 rounded text-[10px] font-semibold capitalize transition-colors ${view === v ? "bg-[#30363d] text-[#e6edf3]" : "text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]"}`}
+          >
+            {v}
+          </button>
+        ))}
+        <div className="flex-1" />
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto px-2 pb-2">
+        {!activeData ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-4">
+            <p className="text-xs text-[#8b949e]">{defaultMsg}</p>
+            {onExecute && (
+              <>
+                <button
+                  onClick={onExecute}
+                  disabled={isRunning}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-orange-500 hover:bg-orange-400 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  {isRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  Execute step
+                </button>
+                <span className="text-[10px] text-[#8b949e]">or <button className="text-[#2f81f7] hover:underline" onClick={onExecute}>set mock data</button></span>
+              </>
+            )}
+          </div>
+        ) : view === "json" ? (
+          <pre className="text-[10px] font-mono text-[#c9d1d9] leading-relaxed whitespace-pre-wrap break-words">
+            {JSON.stringify(activeData, null, 2)}
+          </pre>
+        ) : view === "table" ? (
+          <TableView data={activeData} />
+        ) : (
+          <div className="text-[#c9d1d9]">
+            <div className="flex items-center gap-1.5 py-1 mb-0.5">
+              <span className="text-[9px] font-bold px-1 py-[1px] rounded bg-[#21262d] text-[#8b949e] border border-[#30363d]">{"{}"}</span>
+              <span className="text-[11px] font-mono font-semibold text-[#e6edf3]">root</span>
+              <span className="text-[10px] text-[#6e7681]">
+                {Array.isArray(activeData) ? `Array[${activeData.length}]` : "Object"}
+              </span>
+            </div>
+            <SchemaView data={activeData} path="$json" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   node: WorkflowNode | null;
   onClose: () => void;
   onUpdate: (id: string, config: Record<string, any>, label?: string) => void;
   executionData?: any;
+  nodes?: WorkflowNode[];
+  edges?: any[];
+  selectedExecution?: any;
+  onSelectNode?: (id: string) => void;
+  onTestStep?: (nodeId: string) => Promise<void>;
+  nodeOutputMap?: Record<string, { label: string; data: any }>;
+  isTestingStep?: boolean;
 }
 
 // ── Template / Expression variable hints ─────────────────────────────────────
@@ -28,22 +246,38 @@ const TEMPLATE_VARS = [
 
 // ── Shared form components ────────────────────────────────────────────────────
 
+
 function InputField({
   label, value, onChange, placeholder, type = "text", helperText, monospace,
 }: {
   label: string; value: string; onChange: (v: string) => void;
   placeholder?: string; type?: string; helperText?: string; monospace?: boolean;
 }) {
+  const { draggedPath } = React.useContext(DragCtx);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 relative">
       <label className="text-xs font-medium text-gray-700 dark:text-[#c9d1d9]">{label}</label>
       <input
+        ref={inputRef}
         type={type} value={value || ""} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-[#30363d]
-          bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-[#e6edf3]
-          placeholder-gray-400 dark:placeholder-[#484f58]
-          focus:outline-none focus:ring-2 focus:ring-[#2f81f7]/40 focus:border-[#2f81f7] transition-all
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragOver(false);
+          if (draggedPath && inputRef.current) {
+            const newVal = insertAtCaret(inputRef.current, "{{" + draggedPath + "}}");
+            onChange(newVal);
+          }
+        }}
+        className={`w-full px-3 py-2 text-sm rounded-lg border transition-all
+          ${isDragOver ? "border-green-500 ring-2 ring-green-500/30 bg-green-500/5 dark:bg-green-500/10" : "border-gray-200 dark:border-[#30363d] bg-gray-50 dark:bg-[#0d1117]"}
+          text-gray-900 dark:text-[#e6edf3] placeholder-gray-400 dark:placeholder-[#484f58]
+          focus:outline-none focus:ring-2 focus:ring-[#2f81f7]/40 focus:border-[#2f81f7]
           ${monospace ? "font-mono text-xs" : ""}`}
       />
       {helperText && <p className="text-[10px] text-gray-400 dark:text-[#6e7681]">{helperText}</p>}
@@ -57,16 +291,31 @@ function TextAreaField({
   label: string; value: string; onChange: (v: string) => void;
   placeholder?: string; rows?: number; monospace?: boolean;
 }) {
+  const { draggedPath } = React.useContext(DragCtx);
+  const inputRef = React.useRef<HTMLTextAreaElement>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 relative">
       <label className="text-xs font-medium text-gray-700 dark:text-[#c9d1d9]">{label}</label>
       <textarea
+        ref={inputRef}
         value={value || ""} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} rows={rows}
-        className={`w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-[#30363d]
-          bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-[#e6edf3]
-          placeholder-gray-400 dark:placeholder-[#484f58]
-          focus:outline-none focus:ring-2 focus:ring-[#2f81f7]/40 focus:border-[#2f81f7] transition-all resize-none
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragOver(false);
+          if (draggedPath && inputRef.current) {
+            const newVal = insertAtCaret(inputRef.current, "{{" + draggedPath + "}}");
+            onChange(newVal);
+          }
+        }}
+        className={`w-full px-3 py-2 text-sm rounded-lg border transition-all resize-none
+          ${isDragOver ? "border-green-500 ring-2 ring-green-500/30 bg-green-500/5 dark:bg-green-500/10" : "border-gray-200 dark:border-[#30363d] bg-gray-50 dark:bg-[#0d1117]"}
+          text-gray-900 dark:text-[#e6edf3] placeholder-gray-400 dark:placeholder-[#484f58]
+          focus:outline-none focus:ring-2 focus:ring-[#2f81f7]/40 focus:border-[#2f81f7]
           ${monospace ? "font-mono text-xs leading-relaxed" : ""}`}
       />
     </div>
@@ -308,9 +557,9 @@ function CodeNodeEditor({
             ["$input.first()", "First input item"],
             ["$json", "Current item's JSON data"],
             ["$json.lead.email", "Access nested fields"],
-          ].map(([code, desc]) => (
-            <div key={code} className="flex items-center justify-between">
-              <code className="text-[#a78bfa]">{code}</code>
+          ].map(([c, desc]) => (
+            <div key={c} className="flex items-center justify-between">
+              <code className="text-[#a78bfa]">{c}</code>
               <span className="text-gray-400 dark:text-[#6e7681]">{desc}</span>
             </div>
           ))}
@@ -331,52 +580,80 @@ function DataPinningSection({
   executionData?: any;
 }) {
   const isPinned = !!pinnedData;
+  const [editing, setEditing] = React.useState(false);
+  const [editJson, setEditJson] = React.useState("");
+  const [jsonError, setJsonError] = React.useState("");
+
+  const startEdit = () => {
+    setEditJson(JSON.stringify(pinnedData, null, 2));
+    setJsonError("");
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    try {
+      const parsed = JSON.parse(editJson);
+      onPin(parsed);
+      setEditing(false);
+    } catch (err: any) {
+      setJsonError("Invalid JSON: " + err.message);
+    }
+  };
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          {isPinned ? (
-            <Pin className="w-3.5 h-3.5 text-yellow-500" />
-          ) : (
-            <PinOff className="w-3.5 h-3.5 text-gray-400 dark:text-[#6e7681]" />
+          {isPinned ? <Pin className="w-3.5 h-3.5 text-purple-400" /> : <PinOff className="w-3.5 h-3.5 text-[#6e7681]" />}
+          <span className="text-xs font-medium text-[#c9d1d9]">Data Pinning</span>
+          {isPinned && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">PINNED</span>
           )}
-          <span className="text-xs font-medium text-gray-700 dark:text-[#c9d1d9]">
-            Data Pinning
-          </span>
         </div>
-        {isPinned ? (
-          <button
-            onClick={onUnpin}
-            className="text-[10px] font-medium text-red-500 hover:text-red-600 transition-colors"
-          >
-            Unpin Data
-          </button>
-        ) : executionData ? (
-          <button
-            onClick={() => onPin(executionData.output)}
-            className="text-[10px] font-medium text-yellow-600 hover:text-yellow-700 transition-colors"
-          >
-            Pin Output
-          </button>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          {isPinned && !editing && (
+            <button onClick={startEdit} className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded border border-[#30363d] text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d] transition-colors">
+              <Edit2 className="w-2.5 h-2.5" /> Edit
+            </button>
+          )}
+          {isPinned ? (
+            <button onClick={onUnpin} className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 transition-colors">
+              <PinOff className="w-2.5 h-2.5" /> Unpin
+            </button>
+          ) : executionData?.output ? (
+            <button onClick={() => onPin(executionData.output)} className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors">
+              <Pin className="w-2.5 h-2.5" /> Pin Output
+            </button>
+          ) : null}
+        </div>
       </div>
-
-      {isPinned && (
-        <div className="p-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20">
-          <p className="text-[10px] text-yellow-700 dark:text-yellow-400 mb-1.5 font-medium">
-            📌 Pinned — this node uses fixed data during test runs
+      {isPinned && !editing && (
+        <div className="p-2.5 rounded-lg bg-purple-500/5 border border-purple-500/20">
+          <p className="text-[10px] text-purple-400 mb-1.5 font-medium flex items-center gap-1">
+            <Pin className="w-2.5 h-2.5" /> Pinned — bypasses real API on test runs
           </p>
-          <pre className="text-[9px] font-mono text-yellow-800 dark:text-yellow-300 overflow-auto max-h-24">
+          <pre className="text-[9px] font-mono text-purple-300 overflow-auto max-h-24 leading-relaxed">
             {JSON.stringify(pinnedData, null, 2)}
           </pre>
         </div>
       )}
-
-      {!isPinned && !executionData && (
-        <p className="text-[10px] text-gray-400 dark:text-[#6e7681]">
-          Run the workflow once to pin output data for repeatable testing.
-        </p>
+      {isPinned && editing && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-[#8b949e]">Edit JSON to simulate edge cases:</p>
+          <textarea value={editJson} onChange={e => { setEditJson(e.target.value); setJsonError(""); }} rows={8}
+            className="w-full text-[10px] font-mono px-2 py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/5 text-purple-300 focus:outline-none resize-none"
+            spellCheck={false} />
+          {jsonError && <p className="text-[10px] text-red-400">{jsonError}</p>}
+          <div className="flex gap-2">
+            <button onClick={saveEdit} className="flex items-center gap-1 px-2.5 py-1 text-[10px] rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold transition-colors">
+              <Save className="w-2.5 h-2.5" /> Save
+            </button>
+            <button onClick={() => setEditing(false)} className="px-2.5 py-1 text-[10px] rounded border border-[#30363d] text-[#8b949e] hover:bg-[#21262d] transition-colors">Cancel</button>
+          </div>
+        </div>
+      )}
+      {!isPinned && !executionData?.output && (
+        <p className="text-[10px] text-[#6e7681]">Run the workflow or click Execute step to generate output you can pin for testing.</p>
       )}
     </div>
   );
@@ -384,9 +661,10 @@ function DataPinningSection({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function WorkflowNodeConfigPanel({ node, onClose, onUpdate, executionData }: Props) {
+export default function WorkflowNodeConfigPanel({ node, onClose, onUpdate, executionData, nodes, edges, selectedExecution, onSelectNode, onTestStep, nodeOutputMap, isTestingStep }: Props) {
   const [activeTab, setActiveTab] = useState<"config" | "execution" | "settings">("config");
   const [copiedJson, setCopiedJson] = useState(false);
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (!executionData) setActiveTab("config");
@@ -861,9 +1139,26 @@ export default function WorkflowNodeConfigPanel({ node, onClose, onUpdate, execu
         );
 
       // ── Messaging ─────────────────────────────────────────────
-      case "send_gmail":
+      case "send_gmail": {
+        let connectedGmail = null;
+        try {
+          const creds = typeof window !== "undefined" ? localStorage.getItem("rapidx_credentials") : null;
+          if (creds) {
+            const parsed = JSON.parse(creds);
+            connectedGmail = parsed.gmail?.email;
+          }
+        } catch (e) {}
         return (
           <div className="space-y-3">
+            <div className={`p-2.5 rounded-lg border ${connectedGmail ? "bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20" : "bg-yellow-50 dark:bg-yellow-500/10 border-yellow-200 dark:border-yellow-500/20"}`}>
+              <p className={`text-[11px] font-medium flex items-center gap-1.5 ${connectedGmail ? "text-green-800 dark:text-green-300" : "text-yellow-800 dark:text-yellow-300"}`}>
+                {connectedGmail ? (
+                  <><Check className="w-3.5 h-3.5" /> Sending via: <span className="font-bold">{connectedGmail}</span></>
+                ) : (
+                  <><AlertCircle className="w-3.5 h-3.5" /> Account not configured. Connect Gmail in Integrations.</>
+                )}
+              </p>
+            </div>
             <InputField label="To" value={node.config.to || ""} onChange={(v) => update("to", v)} placeholder="{{$json.lead.email}}" />
             <InputField label="CC (optional)" value={node.config.cc || ""} onChange={(v) => update("cc", v)} placeholder="manager@example.com" />
             <InputField label="BCC (optional)" value={node.config.bcc || ""} onChange={(v) => update("bcc", v)} placeholder="records@example.com" />
@@ -871,6 +1166,7 @@ export default function WorkflowNodeConfigPanel({ node, onClose, onUpdate, execu
             <TextAreaField label="Body" value={node.config.body || ""} onChange={(v) => update("body", v)} placeholder={`Hi {{$json.lead.name}},\n\nThank you for reaching out...`} rows={7} />
           </div>
         );
+      }
 
       case "send_whatsapp":
         return (
@@ -1196,82 +1492,207 @@ export default function WorkflowNodeConfigPanel({ node, onClose, onUpdate, execu
     </div>
   );
 
+  
+  const prevEdges = edges?.filter((e: any) => e.target === node?.id || e.targetId === node?.id) || [];
+  const prevNodes = prevEdges.map((e: any) => ({
+    node: nodes?.find((n: WorkflowNode) => n.id === (e.source || e.sourceId)),
+    edge: e
+  })).filter((n: any) => n.node) as { node: WorkflowNode, edge: any }[];
+
+  const nextEdges = edges?.filter((e: any) => e.source === node?.id || e.sourceId === node?.id) || [];
+  const nextNodes = nextEdges.map((e: any) => ({
+    node: nodes?.find((n: WorkflowNode) => n.id === (e.target || e.targetId)),
+    edge: e
+  })).filter((n: any) => n.node) as { node: WorkflowNode, edge: any }[];
+
   return (
-    <div className="w-[400px] bg-white dark:bg-[#161b22] border-l border-gray-200 dark:border-[#30363d] h-full flex flex-col overflow-hidden transition-colors duration-200 flex-shrink-0">
-      {/* Header */}
-      <div className="p-3.5 border-b border-gray-200 dark:border-[#30363d] flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-gray-900 dark:text-[#e6edf3] truncate">{node.label}</div>
-            <div className="text-[9px] text-gray-400 dark:text-[#6e7681] font-mono">{node.type}</div>
-          </div>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-md text-gray-400 dark:text-[#6e7681] hover:text-gray-600 dark:hover:text-[#e6edf3] hover:bg-gray-100 dark:hover:bg-[#21262d] transition-colors flex-shrink-0"
+    <DragCtx.Provider value={{ draggedPath, setDraggedPath }}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+        <div 
+          onClick={e => e.stopPropagation()}
+          className="w-full max-w-7xl h-[90vh] bg-white dark:bg-[#0d1117] border border-gray-200 dark:border-[#30363d] rounded-xl flex flex-col shadow-2xl overflow-hidden"
         >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+          {/* Top Header */}
+          <div className="p-3 border-b border-gray-200 dark:border-[#30363d] flex items-center justify-between bg-white dark:bg-[#161b22] flex-shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+              <div className="text-sm font-semibold text-gray-900 dark:text-[#e6edf3]">{node.label}</div>
+              <div className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-[#30363d] text-[#8b949e]">
+                {node.type.toUpperCase()}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border border-[#30363d] overflow-hidden">
+                <button className="px-3 py-1.5 text-xs font-medium text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d] transition-colors flex items-center gap-1 border-r border-[#30363d]">
+                  <ChevronDown className="w-3.5 h-3.5 rotate-90" /> Prev
+                </button>
+                <button className="px-3 py-1.5 text-xs font-medium text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d] transition-colors flex items-center gap-1">
+                  Next <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
+                </button>
+              </div>
+              <div className="w-px h-4 bg-[#30363d] mx-1" />
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 text-xs font-medium rounded-md text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d] transition-colors flex items-center gap-1.5"
+              >
+                <X className="w-3.5 h-3.5" /> Back to Canvas
+              </button>
+            </div>
+          </div>
 
-      {/* Tab Bar */}
-      <div className="flex border-b border-gray-200 dark:border-[#30363d] bg-gray-50/50 dark:bg-[#0d1117]/50 flex-shrink-0">
-        {(["config", ...(executionData ? ["execution"] : []), "settings"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab as any)}
-            className={`flex-1 py-2 text-[10px] font-semibold text-center border-b-2 transition-all capitalize flex items-center justify-center gap-1 ${
-              activeTab === tab
-                ? "border-[#2f81f7] text-[#2f81f7]"
-                : "border-transparent text-gray-500 hover:text-gray-700 dark:text-[#8b949e] dark:hover:text-[#e6edf3]"
-            }`}
-          >
-            {tab === "execution" && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
-            {tab === "config" ? "Parameters" : tab === "execution" ? "Output" : "Settings"}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      {activeTab === "execution" ? (
-        renderExecutionTab()
-      ) : activeTab === "settings" ? (
-        renderSettingsTab()
-      ) : (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Node Label */}
-          <InputField label="Node Label" value={node.label} onChange={updateLabel} placeholder="Enter a custom label..." />
-          <div className="h-px bg-gray-200 dark:bg-[#30363d]" />
-
-          {/* Node-specific config */}
-          {renderConfigFields()}
-
-          {/* Expression variables hint */}
-          {(node.category === "action" && !["wait_delay", "sticky_note"].includes(node.type)) && (
-            <>
-              <div className="h-px bg-gray-200 dark:bg-[#30363d]" />
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5 text-gray-400 dark:text-[#6e7681]" />
-                  <span className="text-xs font-medium text-gray-500 dark:text-[#8b949e]">Expression Variables</span>
+          {/* Three Columns Grid */}
+          <div className="flex-1 flex min-h-0">
+            
+            {/* LEFT COLUMN: INPUT */}
+            <div className="w-[30%] flex flex-col border-r border-[#30363d] bg-[#0d1117]">
+              <div className="p-3 border-b border-[#30363d] flex items-center justify-between bg-[#161b22]">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#2f81f7]" />
+                  <span className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">Input</span>
                 </div>
-                <div className="space-y-0.5">
-                  {TEMPLATE_VARS.map((tv) => (
-                    <div
-                      key={tv.var}
-                      className="flex items-center justify-between px-2 py-1.5 rounded-md bg-gray-50 dark:bg-[#0d1117] border border-gray-100 dark:border-[#21262d] hover:border-gray-200 dark:hover:border-[#30363d] transition-colors cursor-default"
-                    >
-                      <code className="text-[9px] font-mono text-[#2f81f7]">{tv.var}</code>
-                      <span className="text-[9px] text-gray-400 dark:text-[#6e7681]">{tv.desc}</span>
+                <button onClick={() => copyJson(executionData?.input)} className="text-[10px] text-[#8b949e] hover:text-[#e6edf3] flex items-center gap-1 bg-[#21262d] px-2 py-1 rounded border border-[#30363d] transition-colors">
+                  {copiedJson ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                  Copy
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <DataViewTabs
+                  data={executionData?.input || null}
+                  defaultMsg="No input data yet. Execute the workflow to see incoming data."
+                  nodeOutputMap={nodeOutputMap}
+                  currentNodeId={node.id}
+                />
+              </div>
+              <div className="h-40 border-t border-[#30363d] bg-[#161b22] flex flex-col p-3">
+                <div className="text-[10px] font-bold text-[#2f81f7] uppercase mb-3 flex items-center gap-1.5">
+                  ? Previous Nodes
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  <div className="flex items-center justify-between p-2 rounded border border-[#30363d] bg-[#0d1117] group cursor-pointer hover:border-gray-500 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <span className="text-xs font-medium text-[#e6edf3]">New Lead Captured</span>
                     </div>
-                  ))}
+                    <ChevronDown className="w-3.5 h-3.5 text-[#8b949e] rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
                 </div>
               </div>
-            </>
-          )}
+            </div>
+
+            {/* MIDDLE COLUMN: PARAMETERS & SETTINGS */}
+            <div className="w-[40%] flex flex-col border-r border-[#30363d] bg-[#0d1117]">
+              {/* Tab Bar */}
+              <div className="flex border-b border-[#30363d] bg-[#161b22] flex-shrink-0 items-center">
+                {(["config", "settings"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-5 py-3 text-[11px] font-bold text-center transition-all capitalize relative ${
+                      activeTab === tab
+                        ? "text-[#e6edf3]"
+                        : "text-[#8b949e] hover:text-[#c9d1d9]"
+                    }`}
+                  >
+                    {tab === "config" ? "Parameters" : "Settings"}
+                    {activeTab === tab && (
+                      <div className="absolute bottom-0 left-0 w-full h-[2px] bg-[#2f81f7]" />
+                    )}
+                  </button>
+                ))}
+                <div className="flex-1" />
+                {onTestStep && (
+                  <button
+                    onClick={() => onTestStep(node.id)}
+                    disabled={isTestingStep}
+                    className="flex items-center gap-1.5 mr-3 px-3 py-1.5 rounded-md bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-bold transition-colors disabled:opacity-50"
+                  >
+                    {isTestingStep ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                    Execute step
+                  </button>
+                )}
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                {activeTab === "settings" ? (
+                  renderSettingsTab()
+                ) : (
+                  <>
+                    <InputField label="Node Label" value={node.label} onChange={updateLabel} placeholder="Enter a custom label..." />
+                    
+                    <div className="space-y-4">
+                      <h4 className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">Configuration</h4>
+                      {renderConfigFields()}
+                    </div>
+
+                    <div className="pt-4 border-t border-[#30363d]">
+                      <h4 className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                        <PinOff className="w-3.5 h-3.5" /> Data Pinning
+                      </h4>
+                      <p className="text-[10px] text-[#8b949e]">
+                        Run the workflow once to pin output data for repeatable testing.
+                      </p>
+                      <div className="mt-3">
+                        <DataPinningSection
+                          pinnedData={node.config._pinnedData}
+                          onPin={pinData}
+                          onUnpin={unpinData}
+                          executionData={executionData}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: OUTPUT */}
+            <div className="w-[30%] flex flex-col bg-[#0d1117]">
+              <div className="p-3 border-b border-[#30363d] flex items-center justify-between bg-[#161b22]">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  <span className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">Output</span>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <DataViewTabs
+                  data={executionData?.output || null}
+                  defaultMsg="No output data yet."
+                  onExecute={onTestStep ? () => onTestStep(node.id) : undefined}
+                  isRunning={isTestingStep}
+                />
+              </div>
+              <div className="h-40 border-t border-[#30363d] bg-[#161b22] flex flex-col p-3">
+                <div className="text-[10px] font-bold text-[#2f81f7] uppercase mb-3 flex items-center gap-1.5">
+                  ? Next Nodes
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  <div className="flex items-center justify-between p-2 rounded border border-[#30363d] bg-[#0d1117] group cursor-pointer hover:border-gray-500 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-red-500" />
+                      <span className="text-xs font-medium text-[#e6edf3]">Request Phone Email</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/20">No</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-[#8b949e] -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-2 rounded border border-[#30363d] bg-[#0d1117] group cursor-pointer hover:border-gray-500 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-[#2f81f7]" />
+                      <span className="text-xs font-medium text-[#e6edf3]">AI Discovery Call</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20">Yes</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-[#8b949e] -rotate-90 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
         </div>
-      )}
-    </div>
+      </div>
+    </DragCtx.Provider>
   );
 }

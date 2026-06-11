@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Users, Upload, Play, Loader2, Server } from 'lucide-react';
 
 export default function BulkDialer() {
@@ -9,6 +9,23 @@ export default function BulkDialer() {
     const [status, setStatus] = useState<'idle' | 'processing' | 'dialing' | 'completed' | 'error'>('idle');
     const [progress, setProgress] = useState({ total: 0, current: 0 });
     const [message, setMessage] = useState('');
+    
+    // Add state for dynamic defaults
+    const [defaultModel, setDefaultModel] = useState('groq');
+    const [defaultVoice, setDefaultVoice] = useState('alloy');
+    
+    // Fetch defaults from config
+    useEffect(() => {
+        fetch('/api/agent-config?mode=outbound')
+            .then(res => res.json())
+            .then(data => {
+                if (data?.config) {
+                    if (data.config.llm_provider) setDefaultModel(data.config.llm_provider);
+                    if (data.config.tts_voice) setDefaultVoice(data.config.tts_voice);
+                }
+            })
+            .catch(console.error);
+    }, []);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -131,7 +148,8 @@ export default function BulkDialer() {
                             <select
                                 className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] outline-none focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-sm"
                                 name="modelProvider"
-                                defaultValue="groq"
+                                value={defaultModel}
+                                onChange={(e) => setDefaultModel(e.target.value)}
                             >
                                 <option value="openai">OpenAI (GPT-4o)</option>
                                 <option value="groq">Groq (Llama 3)</option>
@@ -142,13 +160,16 @@ export default function BulkDialer() {
                             <select
                                 className="w-full px-3 py-2.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] outline-none focus:ring-1 focus:ring-[#2f81f7] focus:border-[#2f81f7] text-sm"
                                 name="voice"
-                                defaultValue="alloy"
+                                value={defaultVoice}
+                                onChange={(e) => setDefaultVoice(e.target.value)}
                             >
                                 <option value="alloy">Alloy (US)</option>
                                 <option value="echo">Echo (US)</option>
                                 <option value="shimmer">Shimmer (US)</option>
                                 <option value="anushka">Anushka (IN)</option>
                                 <option value="aravind">Aravind (IN)</option>
+                                <option value="f786b574-daa5-4673-aa0c-cbe3e8534c02">Default Voice (Cartesia)</option>
+                                <option value="aura-asteria-en">Asteria (Deepgram)</option>
                             </select>
                         </div>
                     </div>

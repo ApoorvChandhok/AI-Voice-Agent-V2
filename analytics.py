@@ -27,34 +27,40 @@ async def analyze_and_save_call(phone_number: str, direction: str, chat_messages
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         
-        # Build transcript string
+        # Build transcript — skip system messages (avoids hitting token limits with large prompts)
         transcript = []
         for msg in chat_messages:
             role = getattr(msg, "role", "unknown")
+            if role == "system":
+                continue  # exclude system prompt from transcript
             content = getattr(msg, "content", "")
             if isinstance(content, list):
                 content = " ".join([str(c) for c in content])
-            transcript.append(f"{role}: {content}")
+            if content and str(content).strip():
+                transcript.append(f"{role}: {content}")
             
         full_transcript = "\n".join(transcript)
         
-        # Call Groq for sentiment and summary
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        prompt = (
-            "Analyze the following call transcript. Provide a JSON response with exactly these keys:\n"
-            "- \"summary\": A 1-2 sentence summary of the call.\n"
-            "- \"sentiment\": Positive, Neutral, or Negative.\n"
-            "- \"caller_intent\": What the caller was asking about or wanted.\n\n"
-            f"Transcript:\n{full_transcript}"
-        )
-        
-        response = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"}
-        )
-        
-        analysis = json.loads(response.choices[0].message.content)
+        # Skip analysis if no real conversation happened
+        if not full_transcript.strip():
+            analysis = {"summary": "No conversation recorded.", "sentiment": "Neutral", "caller_intent": "Unknown"}
+        else:
+            # Use llama-3.1-8b-instant: higher rate limits (20K TPM) vs 70b model (12K TPM)
+            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            prompt = (
+                "Analyze the following call transcript. Provide a JSON response with exactly these keys:\n"
+                "- \"summary\": A 1-2 sentence summary of the call.\n"
+                "- \"sentiment\": Positive, Neutral, or Negative.\n"
+                "- \"caller_intent\": What the caller was asking about or wanted.\n\n"
+                f"Transcript:\n{full_transcript}"
+            )
+            
+            response = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.1-8b-instant",
+                response_format={"type": "json_object"}
+            )
+            analysis = json.loads(response.choices[0].message.content)
         
         # Append to call_logs.json
         logs = []

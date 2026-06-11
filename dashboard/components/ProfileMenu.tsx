@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { LogOut, Settings, User, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function ProfileMenu() {
+export default function ProfileMenu({ className }: { className?: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState<{
     name: string;
@@ -69,7 +69,7 @@ export default function ProfileMenu() {
   if (!profile) return null; // Only show if user is logged in via Gmail
 
   return (
-    <div className="relative ml-auto" ref={menuRef}>
+    <div className={className || "relative ml-auto"} ref={menuRef}>
       <motion.button
         whileTap={{ scale: 0.95 }}
         onClick={() => setIsOpen(!isOpen)}

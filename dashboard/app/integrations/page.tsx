@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Mail, MessageCircle, Instagram, Key, Check, Plus, AlertCircle, 
@@ -26,7 +26,7 @@ interface Integration {
   }[];
 }
 
-export default function IntegrationsPage() {
+function IntegrationsContent() {
   const searchParams = useSearchParams();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [activeIntegration, setActiveIntegration] = useState<Integration | null>(null);
@@ -273,7 +273,7 @@ export default function IntegrationsPage() {
                             {savedConfigs.gmail?.email}
                           </p>
                         </div>
-                        <ShieldCheck className="w-4 h-4 text-green-500 flex-shrink-0 ml-auto" title="Secured with Google OAuth" />
+                        <ShieldCheck className="w-4 h-4 text-green-500 flex-shrink-0 ml-auto" />
                       </div>
                     ) : (
                       <div className="space-y-1 text-[11px] font-mono text-gray-500 dark:text-[#8b949e]">
@@ -448,5 +448,17 @@ export default function IntegrationsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function IntegrationsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#2f81f7]"></div>
+      </div>
+    }>
+      <IntegrationsContent />
+    </Suspense>
   );
 }

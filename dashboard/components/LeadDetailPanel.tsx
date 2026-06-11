@@ -41,7 +41,9 @@ export default function LeadDetailPanel({ lead, onClose, onUpdate }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editEmail, setEditEmail] = useState(lead.email);
   const [editCity, setEditCity] = useState(lead.city);
+  const [editPhone, setEditPhone] = useState(lead.phone);
   const [editAssignee, setEditAssignee] = useState(lead.assignedTo);
+  const [editName, setEditName] = useState(lead.name);
   const [saving, setSaving] = useState(false);
 
   const nameSum = (lead.name || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -69,8 +71,19 @@ export default function LeadDetailPanel({ lead, onClose, onUpdate }: Props) {
 
   const handleSaveEdit = async () => {
     setSaving(true);
-    await updateLeadMeta(lead.phone, { email: editEmail, assignedTo: editAssignee });
-    onUpdate({ ...lead, email: editEmail, city: editCity, assignedTo: editAssignee, lastActivity: new Date().toISOString() });
+    await updateLeadMeta(lead.phone, {
+      email: editEmail,
+      city: editCity,
+      assignedTo: editAssignee,
+    });
+    onUpdate({
+      ...lead,
+      name: editName,
+      email: editEmail,
+      city: editCity,
+      assignedTo: editAssignee,
+      lastActivity: new Date().toISOString()
+    });
     setIsEditing(false);
     setSaving(false);
   };
@@ -216,7 +229,17 @@ export default function LeadDetailPanel({ lead, onClose, onUpdate }: Props) {
                   </div>
                   <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50/80 dark:bg-white/[0.03] border border-gray-100/80 dark:border-white/5">
                     <MapPin className="w-4 h-4 text-gray-400 dark:text-[#6e7681]" />
-                    <span className="text-sm text-gray-700 dark:text-[#c9d1d9]">{lead.city || <span className="text-gray-300 dark:text-[#484f58] italic">Not set</span>}</span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editCity}
+                        onChange={(e) => setEditCity(e.target.value)}
+                        placeholder="City / Location"
+                        className="flex-1 text-sm bg-transparent text-gray-700 dark:text-[#c9d1d9] outline-none placeholder-gray-300 dark:placeholder-[#484f58]"
+                      />
+                    ) : (
+                      <span className="text-sm text-gray-700 dark:text-[#c9d1d9]">{lead.city || <span className="text-gray-300 dark:text-[#484f58] italic">Not set</span>}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50/80 dark:bg-white/[0.03] border border-gray-100/80 dark:border-white/5">
                     <User className="w-4 h-4 text-gray-400 dark:text-[#6e7681]" />

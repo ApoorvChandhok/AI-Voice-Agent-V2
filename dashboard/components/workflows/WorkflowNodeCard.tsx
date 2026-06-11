@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import {
   UserPlus, PhoneOff, Clock, Webhook, RefreshCw, FileText, Tag, Heart,
   GitBranch, Filter, Search, Hash, Smile,
@@ -80,7 +81,7 @@ function getConfigSummary(node: WorkflowNode): string {
   }
 }
 
-export default function WorkflowNodeCard({
+export default React.memo(function WorkflowNodeCard({
   node,
   isSelected,
   onSelect,
@@ -143,179 +144,193 @@ export default function WorkflowNodeCard({
         isSelected ? "z-20" : "z-10"
       }`}
       style={{
-        left: node.position.x,
-        top: node.position.y,
-        width: 260,
+        transform: `translate3d(${node.position.x}px, ${node.position.y}px, 0)`,
+        willChange: "transform",
+        top: 0,
+        left: 0,
+        width: 240,
       }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(node.id);
       }}
     >
-      {/* Input port (top) — not for triggers */}
-      {!isTrigger && (
-        <div className="flex justify-center -mb-1 relative z-30">
-          <div
-            className="w-3 h-3 rounded-full border-2 border-[#30363d] bg-[#0d1117]"
-            data-port-id={`${node.id}-input`}
-            data-port-type="input"
-          />
-        </div>
-      )}
-
-      <div
-        className={`rounded-2xl border transition-all duration-200 bg-white/90 dark:bg-[#161b22]/90 backdrop-blur-md ${borderClass} ${shadowClass} ${pulseClass}`}
+      {/* Vertical layout wrapper: [top port] [card] [bottom port(s)] */}
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.8, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 350, damping: 25 }}
+        className="flex flex-col items-center w-full"
       >
-        {/* Color accent bar */}
-        <div className="h-1 rounded-t-xl" style={{ backgroundColor: color }} />
-
-        {/* Header */}
-        <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-gray-100/80 dark:border-white/5">
-          <div
-            className="cursor-grab active:cursor-grabbing p-0.5 rounded text-gray-400 dark:text-[#6e7681] hover:text-gray-600 dark:hover:text-[#8b949e]"
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              onDragStart(node.id, e);
-            }}
-          >
-            <GripVertical className="w-3.5 h-3.5" />
-          </div>
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{
-              backgroundColor: `${color}15`,
-              border: `1px solid ${color}30`,
-            }}
-          >
-            <Icon className="w-3.5 h-3.5" style={{ color }} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-gray-900 dark:text-[#e6edf3] truncate">
-              {node.label}
-            </div>
-            <div className="text-[10px] text-gray-400 dark:text-[#6e7681] capitalize">
-              {node.category}
-            </div>
-          </div>
-          
-          {/* Pinned badge */}
-          {isPinned && (
-            <div className="flex items-center justify-center" title="Data pinned — will use cached output">
-              <Pin className="w-3 h-3 text-purple-400" />
-            </div>
-          )}
-
-          {/* Validation badge + tooltip */}
-          {executionState === "idle" && (hasErrors || hasWarnings) && (
+        {/* Input port (TOP side) — not for triggers */}
+        {!isTrigger && (
+          <div className="flex flex-row items-center justify-center -mb-[5px] relative z-30">
             <div
-              className="relative flex items-center justify-center mr-1 cursor-help"
-              onMouseEnter={() => setShowTooltip(true)}
-              onMouseLeave={() => setShowTooltip(false)}
+              className="w-[10px] h-[10px] rounded-full border-2 border-[#30363d] bg-[#0d1117] hover:border-indigo-400 hover:bg-indigo-500/20 transition-colors cursor-crosshair"
+              data-port-id={`${node.id}-input`}
+              data-port-type="input"
+            />
+          </div>
+        )}
+
+        {/* Main card body */}
+        <div
+          className={`w-full rounded-2xl border transition-all duration-200 bg-white/90 dark:bg-[#161b22]/90 backdrop-blur-md ${borderClass} ${shadowClass} ${pulseClass}`}
+        >
+          {/* Color accent bar (left side for LR layout) */}
+          <div className="h-1 rounded-t-xl" style={{ backgroundColor: color }} />
+
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100/80 dark:border-white/5">
+            <div
+              className="cursor-grab active:cursor-grabbing p-0.5 rounded text-gray-400 dark:text-[#6e7681] hover:text-gray-600 dark:hover:text-[#8b949e]"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                onDragStart(node.id, e);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{
+                backgroundColor: `${color}15`,
+                border: `1px solid ${color}30`,
+              }}
+            >
+              <Icon className="w-3.5 h-3.5" style={{ color }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-gray-900 dark:text-[#e6edf3] truncate">
+                {node.label}
+              </div>
+              <div className="text-[10px] text-gray-400 dark:text-[#6e7681] capitalize">
+                {node.category}
+              </div>
+            </div>
+            
+            {/* Pinned badge */}
+            {isPinned && (
+              <div className="flex items-center justify-center" title="Data pinned — will use cached output">
+                <Pin className="w-3 h-3 text-purple-400" />
+              </div>
+            )}
+
+            {/* Validation badge + tooltip */}
+            {executionState === "idle" && (hasErrors || hasWarnings) && (
+              <div
+                className="relative flex items-center justify-center mr-1 cursor-help"
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowTooltip(!showTooltip);
+                }}
+                title={hasErrors ? "Errors:\n" + validation?.errors?.join("\n") : "Warnings:\n" + validation?.warnings?.join("\n")}
+              >
+                {hasErrors ? (
+                  <AlertCircle className="w-4 h-4 text-red-400" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                )}
+
+                {/* Tooltip */}
+                {showTooltip && allIssues.length > 0 && (
+                  <div className="absolute right-0 bottom-full mb-2 w-64 bg-white/95 dark:bg-[#161b22]/95 backdrop-blur-xl border border-gray-200/50 dark:border-white/8 rounded-xl shadow-2xl p-3 z-[100] pointer-events-none">
+                    <p className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-2">
+                      {hasErrors ? "⚠ Configuration Issues" : "⚠ Warnings"}
+                    </p>
+                    <ul className="space-y-1">
+                      {allIssues.map((issue, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-[11px] text-gray-400">
+                          <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            i < (validation?.errors?.length ?? 0) ? "bg-red-400" : "bg-amber-400"
+                          }`} />
+                          {issue}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Execution badge */}
+            {executionState !== "idle" && (
+              <div className="flex items-center justify-center mr-1">
+                {executionState === "running" && (
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
+                  </span>
+                )}
+                {executionState === "success" && (
+                  <span className="inline-flex items-center justify-center w-4.5 h-4.5 rounded-full bg-green-500 dark:bg-green-500/25 text-white dark:text-green-400 text-[10px] font-bold shadow-sm shadow-green-500/20 border border-green-500/30">
+                    ✓
+                  </span>
+                )}
+                {executionState === "error" && (
+                  <span className="inline-flex items-center justify-center w-4.5 h-4.5 rounded-full bg-red-500 dark:bg-red-500/25 text-white dark:text-red-400 text-[10px] font-bold shadow-sm shadow-red-500/20 border border-red-500/30">
+                    !
+                  </span>
+                )}
+              </div>
+            )}
+
+            <button
               onClick={(e) => {
                 e.stopPropagation();
-                setShowTooltip(!showTooltip);
+                onDelete(node.id);
               }}
-              title={hasErrors ? "Errors:\n" + validation?.errors?.join("\n") : "Warnings:\n" + validation?.warnings?.join("\n")}
+              className="p-1 rounded-md text-gray-400 dark:text-[#6e7681] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
             >
-              {hasErrors ? (
-                <AlertCircle className="w-4 h-4 text-red-400" />
-              ) : (
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-              )}
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
-              {/* Tooltip */}
-              {showTooltip && allIssues.length > 0 && (
-                <div className="absolute right-0 bottom-full mb-2 w-64 bg-white/95 dark:bg-[#161b22]/95 backdrop-blur-xl border border-gray-200/50 dark:border-white/8 rounded-xl shadow-2xl p-3 z-[100] pointer-events-none">
-                  <p className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-2">
-                    {hasErrors ? "⚠ Configuration Issues" : "⚠ Warnings"}
-                  </p>
-                  <ul className="space-y-1">
-                    {allIssues.map((issue, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-[11px] text-gray-400">
-                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                          i < (validation?.errors?.length ?? 0) ? "bg-red-400" : "bg-amber-400"
-                        }`} />
-                        {issue}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Execution badge */}
-          {executionState !== "idle" && (
-            <div className="flex items-center justify-center mr-1">
-              {executionState === "running" && (
-                <span className="flex h-2 w-2 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
-                </span>
-              )}
-              {executionState === "success" && (
-                <span className="inline-flex items-center justify-center w-4.5 h-4.5 rounded-full bg-green-500 dark:bg-green-500/25 text-white dark:text-green-400 text-[10px] font-bold shadow-sm shadow-green-500/20 border border-green-500/30">
-                  ✓
-                </span>
-              )}
-              {executionState === "error" && (
-                <span className="inline-flex items-center justify-center w-4.5 h-4.5 rounded-full bg-red-500 dark:bg-red-500/25 text-white dark:text-red-400 text-[10px] font-bold shadow-sm shadow-red-500/20 border border-red-500/30">
-                  !
-                </span>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(node.id);
-            }}
-            className="p-1 rounded-md text-gray-400 dark:text-[#6e7681] hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {/* Config summary */}
+          <div className="px-3 py-2">
+            <p className="text-[11px] text-gray-500 dark:text-[#8b949e] truncate font-mono">
+              {configSummary}
+            </p>
+          </div>
         </div>
 
-        {/* Config summary */}
-        <div className="px-3 py-2">
-          <p className="text-[11px] text-gray-500 dark:text-[#8b949e] truncate font-mono">
-            {configSummary}
-          </p>
+        {/* Output ports (BOTTOM side) */}
+        <div className={`flex flex-row items-center justify-center -mt-[5px] relative z-30 ${isCondition ? "gap-16" : ""}`}>
+          {isCondition ? (
+            <>
+              {/* YES port */}
+              <div className="flex flex-col items-center gap-1">
+                <div
+                  className="w-[14px] h-[14px] rounded-full border-2 bg-[#0d1117] hover:bg-green-500/20 transition-colors cursor-crosshair"
+                  style={{ borderColor: "#3fb950" }}
+                  data-port-id={`${node.id}-yes`}
+                  data-port-type="output-yes"
+                />
+                <span className="text-[10px] text-green-400 font-bold leading-none tracking-wide">YES</span>
+              </div>
+              {/* NO port */}
+              <div className="flex flex-col items-center gap-1">
+                <div
+                  className="w-[14px] h-[14px] rounded-full border-2 bg-[#0d1117] hover:bg-red-500/20 transition-colors cursor-crosshair"
+                  style={{ borderColor: "#f85149" }}
+                  data-port-id={`${node.id}-no`}
+                  data-port-type="output-no"
+                />
+                <span className="text-[10px] text-red-400 font-bold leading-none tracking-wide">NO</span>
+              </div>
+            </>
+          ) : (
+            <div
+              className="w-[10px] h-[10px] rounded-full border-2 border-[#30363d] bg-[#0d1117] hover:border-indigo-400 hover:bg-indigo-500/20 transition-colors cursor-crosshair"
+              data-port-id={`${node.id}-output`}
+              data-port-type="output"
+            />
+          )}
         </div>
-      </div>
-
-      {/* Output ports (bottom) */}
-      <div className={`flex ${isCondition ? "justify-between px-8" : "justify-center"} -mt-1 relative z-30`}>
-        {isCondition ? (
-          <>
-            <div className="flex flex-col items-center">
-              <div
-                className="w-3 h-3 rounded-full border-2 bg-[#0d1117]"
-                style={{ borderColor: "#3fb950" }}
-                data-port-id={`${node.id}-yes`}
-                data-port-type="output-yes"
-              />
-              <span className="text-[9px] text-green-500 font-medium mt-0.5">Yes</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <div
-                className="w-3 h-3 rounded-full border-2 bg-[#0d1117]"
-                style={{ borderColor: "#f85149" }}
-                data-port-id={`${node.id}-no`}
-                data-port-type="output-no"
-              />
-              <span className="text-[9px] text-red-500 font-medium mt-0.5">No</span>
-            </div>
-          </>
-        ) : (
-          <div
-            className="w-3 h-3 rounded-full border-2 border-[#30363d] bg-[#0d1117]"
-            data-port-id={`${node.id}-output`}
-            data-port-type="output"
-          />
-        )}
-      </div>
+      </motion.div>
     </div>
   );
-}
+});

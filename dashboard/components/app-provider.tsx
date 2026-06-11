@@ -37,23 +37,35 @@ interface AppContextType {
    * Pass the raw cost value exactly as returned by VoBiz (already in INR).
    */
   formatCurrency: (amountInINR: number) => string;
+  isSidebarCollapsed: boolean;
+  setIsSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 export const AppContext = React.createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currency, setCurrency] = React.useState<Currency>("INR");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
 
   React.useEffect(() => {
     const saved = localStorage.getItem("app-currency") as Currency;
     if (saved && INR_TO_CURRENCY[saved] !== undefined) {
       setCurrency(saved);
     }
+    const savedSidebar = localStorage.getItem("app-sidebar-collapsed");
+    if (savedSidebar === "true") {
+      setIsSidebarCollapsed(true);
+    }
   }, []);
 
   const handleSetCurrency = (c: Currency) => {
     setCurrency(c);
     localStorage.setItem("app-currency", c);
+  };
+
+  const handleSetSidebarCollapsed = (collapsed: boolean) => {
+    setIsSidebarCollapsed(collapsed);
+    localStorage.setItem("app-sidebar-collapsed", String(collapsed));
   };
 
   const formatCurrency = (amountInINR: number) => {
@@ -63,7 +75,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ currency, setCurrency: handleSetCurrency, formatCurrency }}>
+    <AppContext.Provider value={{ 
+      currency, 
+      setCurrency: handleSetCurrency, 
+      formatCurrency,
+      isSidebarCollapsed,
+      setIsSidebarCollapsed: handleSetSidebarCollapsed
+    }}>
       <NextThemesProvider attribute="class" defaultTheme="system" enableSystem>
         {children}
       </NextThemesProvider>

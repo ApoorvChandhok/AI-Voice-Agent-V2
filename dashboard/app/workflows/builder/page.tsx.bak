@@ -580,14 +580,19 @@ function BuilderContent() {
   // ── Node Operations ──────────────────────────────────────────────────────────
   const handleAddNode = useCallback(
     (metadata: NodeMetadata) => {
-      const maxY = nodes.length > 0 ? Math.max(...nodes.map((n) => n.position.y)) : -60;
+      // LR layout: position new node to the RIGHT of the rightmost node
+      const maxX = nodes.length > 0 ? Math.max(...nodes.map((n) => n.position.x)) : -80;
+      // Center vertically around the average Y position, or start at 200
+      const avgY = nodes.length > 0
+        ? Math.round(nodes.reduce((sum, n) => sum + n.position.y, 0) / nodes.length)
+        : 200;
       const newNode: WorkflowNode = {
         id: generateNodeId(),
         type: metadata.type,
         category: metadata.category,
         label: metadata.label,
         config: { ...metadata.defaultConfig },
-        position: { x: 300, y: maxY + 170 },
+        position: { x: maxX + 320, y: avgY },
       };
       setNodes((prev) => [...prev, newNode]);
       setSelectedNodeId(newNode.id);
@@ -677,151 +682,84 @@ function BuilderContent() {
     const visited = new Set<string>();
     let overallStatus: "success" | "error" = "success";
 
-    try {
-      while (queue.length > 0) {
-        const { nodeId, parentOutput } = queue.shift()!;
-        if (visited.has(nodeId)) continue;
-        visited.add(nodeId);
+    while (queue.length > 0) {
+      const { nodeId, parentOutput } = queue.shift()!;
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
 
-        const node = nodes.find((n) => n.id === nodeId);
-        if (!node) continue;
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) continue;
 
-        // Skip pinned data nodes (use pinned output directly)
-        if (node.config._pinnedData) {
-          statuses[node.id] = "success";
-          setNodeExecutionStatuses({ ...statuses });
-          nodeOutputMap[node.label] = node.config._pinnedData;
-          nodeExecs[node.id] = {
-            nodeId: node.id, nodeLabel: node.label, type: node.type, status: "success",
-            input: parentOutput, output: node.config._pinnedData,
-            startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
-            executionMs: 0, pinned: true
-          };
-          const outgoingEdges = edges.filter((e) => e.sourceId === node.id);
-          outgoingEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: node.config._pinnedData }));
-          continue;
-        }
-
-        statuses[node.id] = "running";
+      // Skip pinned data nodes (use pinned output directly)
+      if (node.config._pinnedData) {
+        statuses[node.id] = "success";
         setNodeExecutionStatuses({ ...statuses });
-
-        // Delay to simulate work
-        await new Promise((resolve) => setTimeout(resolve, 600 + Math.random() * 400));
-
-        const input = parentOutput || { lead: { ...DEMO_LEAD } };
-        const { output, status, error, executionMs } = await buildNodeOutput(node, input, nodeOutputMap);
-
-        if (status === "error") overallStatus = "error";
-
-        statuses[node.id] = status;
-        setNodeExecutionStatuses({ ...statuses });
-
-        nodeOutputMap[node.label] = output;
+        nodeOutputMap[node.label] = node.config._pinnedData;
         nodeExecs[node.id] = {
-          nodeId: node.id, nodeLabel: node.label, type: node.type, status,
-          input, output, error,
-          startedAt: new Date(Date.now() - executionMs).toISOString(),
-          finishedAt: new Date().toISOString(),
-          executionMs
+          nodeId: node.id, nodeLabel: node.label, type: node.type, status: "success",
+          input: parentOutput, output: node.config._pinnedData,
+          startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+          executionMs: 0, pinned: true
         };
-
         const outgoingEdges = edges.filter((e) => e.sourceId === node.id);
-
-        // Route based on node type
-        if (node.type === "if_else" || node.type === "check_lead_field" || node.type === "check_sentiment" || node.type === "filter_by_tag" || node.type === "check_call_count") {
-          const chosenBranch = output.branch;
-          const matchedEdges = outgoingEdges.filter((e) => e.sourcePort === chosenBranch);
-          matchedEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
-        } else if (node.type === "switch_router") {
-          const routedPort = output.outputIndex === -1 ? "fallback" : `output_${output.outputIndex}`;
-          const matchedEdges = outgoingEdges.filter((e) => e.sourcePort === routedPort || (!e.sourcePort && output.outputIndex === -1));
-          matchedEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
-        } else {
-          outgoingEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
-        }
-      }
-    } catch (err: any) {
-      console.error("Workflow execution crash:", err);
-      overallStatus = "error";
-    } finally {
-      setIsExecuting(false);
-
-      if (overallStatus === "success") {
-        setShowSuccessAnim(true);
-        setTimeout(() => setShowSuccessAnim(false), 4000);
+        outgoingEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: node.config._pinnedData }));
+        continue;
       }
 
-      setExecutions((prev) =>
-        prev.map((exec) =>
-          exec.id === executionId
-            ? { ...exec, status: overallStatus, finishedAt: new Date().toISOString(), nodeExecutions: nodeExecs }
-            : exec
-        )
-      );
+      statuses[node.id] = "running";
+      setNodeExecutionStatuses({ ...statuses });
+
+      // Delay to simulate work
+      await new Promise((resolve) => setTimeout(resolve, 600 + Math.random() * 400));
+
+      const input = parentOutput || { lead: { ...DEMO_LEAD } };
+      const { output, status, error, executionMs } = await buildNodeOutput(node, input, nodeOutputMap);
+
+      if (status === "error") overallStatus = "error";
+
+      statuses[node.id] = status;
+      setNodeExecutionStatuses({ ...statuses });
+
+      nodeOutputMap[node.label] = output;
+      nodeExecs[node.id] = {
+        nodeId: node.id, nodeLabel: node.label, type: node.type, status,
+        input, output, error,
+        startedAt: new Date(Date.now() - executionMs).toISOString(),
+        finishedAt: new Date().toISOString(),
+        executionMs
+      };
+
+      const outgoingEdges = edges.filter((e) => e.sourceId === node.id);
+
+      // Route based on node type
+      if (node.type === "if_else" || node.type === "check_lead_field" || node.type === "check_sentiment" || node.type === "filter_by_tag" || node.type === "check_call_count") {
+        const chosenBranch = output.branch;
+        const matchedEdges = outgoingEdges.filter((e) => e.sourcePort === chosenBranch);
+        matchedEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
+      } else if (node.type === "switch_router") {
+        const routedPort = output.outputIndex === -1 ? "fallback" : `output_${output.outputIndex}`;
+        const matchedEdges = outgoingEdges.filter((e) => e.sourcePort === routedPort || (!e.sourcePort && output.outputIndex === -1));
+        matchedEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
+      } else {
+        outgoingEdges.forEach((e) => queue.push({ nodeId: e.targetId, parentOutput: output }));
+      }
     }
-  };
 
-  // ── Single-Node Test Step ─────────────────────────────────────────────────────
-  const [isTestingStep, setIsTestingStep] = useState(false);
+    setIsExecuting(false);
 
-  const handleTestStep = async (nodeId: string) => {
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node || isTestingStep) return;
-
-    setIsTestingStep(true);
-    setNodeExecutionStatuses(prev => ({ ...prev, [nodeId]: "running" }));
-
-    // Find the input: use last execution data, or the parent's output, or demo lead
-    const lastExec = executions[0];
-    const parentInput = lastExec?.nodeExecutions[nodeId]?.input ?? { lead: { ...DEMO_LEAD } };
-
-    // Build node output map from latest execution
-    const nodeOutputMap: Record<string, any> = {};
-    if (lastExec) {
-      Object.values(lastExec.nodeExecutions).forEach((ne: any) => {
-        nodeOutputMap[ne.nodeLabel] = ne.output;
-      });
+    if (overallStatus === "success") {
+      setShowSuccessAnim(true);
+      setTimeout(() => setShowSuccessAnim(false), 4000);
     }
 
-    const { output, status, error, executionMs } = await buildNodeOutput(node, parentInput, nodeOutputMap);
-
-    setNodeExecutionStatuses(prev => ({ ...prev, [nodeId]: status }));
-
-    const testExecId = executions[0]?.id ?? `exec_test_${Date.now()}`;
-    setExecutions(prev => {
-      const existing = prev[0];
-      if (!existing) return prev;
-      return [
-        {
-          ...existing,
-          nodeExecutions: {
-            ...existing.nodeExecutions,
-            [nodeId]: {
-              nodeId, nodeLabel: node.label, type: node.type, status,
-              input: parentInput, output, error,
-              startedAt: new Date(Date.now() - executionMs).toISOString(),
-              finishedAt: new Date().toISOString(),
-              executionMs
-            }
-          }
-        },
-        ...prev.slice(1)
-      ];
-    });
-
-    setIsTestingStep(false);
+    setExecutions((prev) =>
+      prev.map((exec) =>
+        exec.id === executionId
+          ? { ...exec, status: overallStatus, finishedAt: new Date().toISOString(), nodeExecutions: nodeExecs }
+          : exec
+      )
+    );
   };
-
-  // Build nodeOutputMap for the panel (all executed nodes' outputs for variable scope)
-  const panelNodeOutputMap = React.useMemo(() => {
-    const lastExec = executions[0];
-    if (!lastExec) return undefined;
-    const map: Record<string, { label: string; data: any }> = {};
-    Object.values(lastExec.nodeExecutions).forEach((ne: any) => {
-      map[ne.nodeId] = { label: ne.nodeLabel, data: ne.output };
-    });
-    return map;
-  }, [executions]);
 
   // ── JSON Export / Import ─────────────────────────────────────────────────────
   const exportWorkflowJson = () => {
@@ -906,7 +844,7 @@ function BuilderContent() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden relative">
+    <div className="h-full flex flex-col -m-8 overflow-hidden relative">
       {showSuccessAnim && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center justify-center pointer-events-none">
           <div className="bg-white dark:bg-[#161b22] px-6 py-4 rounded-2xl shadow-[0_10px_40px_rgba(34,197,94,0.2)] border border-green-500/30 flex items-center gap-4 animate-in fade-in slide-in-from-top-8 zoom-in-75 duration-500 fill-mode-forwards" style={{ animationTimingFunction: "cubic-bezier(0.175, 0.885, 0.32, 1.275)" }}>
@@ -1100,23 +1038,14 @@ function BuilderContent() {
         />
 
         {/* Right panel: config or executions */}
-        {selectedNode && (
+        {selectedNode ? (
           <WorkflowNodeConfigPanel
             node={selectedNode}
             onClose={() => setSelectedNodeId(null)}
             onUpdate={handleUpdateNodeConfig}
-            executionData={executions[0]?.nodeExecutions?.[selectedNode.id]}
-            nodes={nodes}
-            edges={edges}
-            selectedExecution={selectedExecution}
-            onSelectNode={setSelectedNodeId}
-            onTestStep={handleTestStep}
-            nodeOutputMap={panelNodeOutputMap}
-            isTestingStep={isTestingStep}
+            executionData={selectedExecution?.nodeExecutions?.[selectedNode.id]}
           />
-        )}
-        
-        {showExecutionsPanel && !selectedNode && (
+        ) : showExecutionsPanel ? (
           <div className="w-96 bg-white dark:bg-[#161b22] border-l border-gray-200 dark:border-[#30363d] h-full flex flex-col overflow-hidden flex-shrink-0">
             {/* Panel header */}
             <div className="p-3.5 border-b border-gray-200 dark:border-[#30363d] flex items-center justify-between flex-shrink-0">
@@ -1209,7 +1138,7 @@ function BuilderContent() {
               )}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* AI Generate Modal */}
@@ -1253,7 +1182,7 @@ function BuilderContent() {
                   <textarea
                     value={importJsonText}
                     onChange={(e) => { setImportJsonText(e.target.value); setImportError(""); }}
-                    placeholder='{"name": "My Workflow", "nodes": [...], "edges": [...]}'
+                    placeholder="Enter JSON here..."
                     rows={16}
                     className="w-full px-3 py-2.5 text-xs font-mono rounded-lg border border-gray-200 dark:border-[#30363d] bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-[#e6edf3] focus:outline-none focus:ring-2 focus:ring-[#2f81f7]/40 resize-none"
                   />
@@ -1289,7 +1218,7 @@ function BuilderContent() {
   );
 }
 
-export default function WorkflowBuilderPage() {
+const WorkflowBuilderPage = () => {
   return (
     <Suspense
       fallback={
@@ -1301,4 +1230,6 @@ export default function WorkflowBuilderPage() {
       <BuilderContent />
     </Suspense>
   );
-}
+};
+
+export default WorkflowBuilderPage;

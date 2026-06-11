@@ -43,9 +43,38 @@ Use this context to inform your answers if they ask questions about what they ar
         { role: "system", content: BASE_SYSTEM_PROMPT + "\n" + dynamicContext },
         ...messages,
       ],
+      maxTokens: 1024, // prevent runaway generation
     });
 
-    return result.toDataStreamResponse();
+    // TODO: [REMOVE BEFORE GO-LIVE] Token usage tracking for dev/testing only
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = result.textStream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(encoder.encode(value));
+        }
+        // Append token usage — race with timeout so stream always closes
+        try {
+          const usage = await Promise.race([
+            result.usage,
+            new Promise<null>((res) => setTimeout(() => res(null), 3000)),
+          ]);
+          if (usage) {
+            controller.enqueue(
+              encoder.encode(`\n__TOKENS__${JSON.stringify(usage)}`)
+            );
+          }
+        } catch (_) {}
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   } catch (error: any) {
     console.error("Copilot API Error:", error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });

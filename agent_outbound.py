@@ -15,6 +15,22 @@ from typing import Optional
 
 load_dotenv(".env")
 
+
+def _normalize_phone(number: str) -> str:
+    """Ensure phone is in E.164 format. Defaults to +91 for 10-digit Indian numbers."""
+    if not number:
+        return number
+    # Strip whitespace and any existing formatting
+    number = number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if number.startswith("+"):
+        return number  # Already E.164
+    if number.startswith("91") and len(number) == 12:
+        return f"+{number}"  # 91XXXXXXXXXX -> +91XXXXXXXXXX
+    if len(number) == 10:
+        return f"+91{number}"  # 10-digit Indian mobile
+    # Fallback: just prepend +
+    return f"+{number}"
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -27,7 +43,11 @@ logger = logging.getLogger("outbound-agent")
 # Import the OUTBOUND config directly — no routing needed
 import config_outbound as config
 
-logger.info("[OUTBOUND] Agent loaded → School Receptionist")
+logger.info(f"[OUTBOUND] Agent loaded -> {getattr(config, 'AGENT_NAME', 'Unknown')}")
+
+# Pre-load VAD model at startup so it's ready instantly when a call arrives
+# (avoids ~1-2s cold-load delay on first call)
+_VAD = silero.VAD.load()
 
 
 # =============================================================================
@@ -49,7 +69,7 @@ def _build_tts(provider_override: str = None, voice_override: str = None):
         model    = os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL)
         voice    = voice_override or os.getenv("SARVAM_VOICE", config.DEFAULT_TTS_VOICE)
         language = os.getenv("SARVAM_LANGUAGE", config.SARVAM_LANGUAGE)
-        logger.info(f"[TTS] Sarvam — model={model}, speaker={voice}, lang={language}")
+        logger.info(f"[TTS] Sarvam -- model={model}, speaker={voice}, lang={language}")
         return sarvam.TTS(model=model, speaker=voice, target_language_code=language)
     if provider == "deepgram":
         return deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en"))
@@ -86,7 +106,7 @@ class OutboundTools(llm.ToolContext):
         self.phone_number = phone_number
 
     @llm.function_tool(description="Look up user details by phone number.")
-    def lookup_user(self, phone: str):
+    async def lookup_user(self, phone: str):
         """Args: phone: phone number to look up."""
         logger.info(f"[TOOL] lookup_user: {phone}")
         return "User found: Shreyas Raj. Status: Premium. Last order: Coffee setup (Delivered)."
@@ -175,7 +195,7 @@ async def entrypoint(ctx: agents.JobContext):
             data        = json.loads(ctx.job.metadata)
             phone_number = data.get("phone_number")
             config_dict = data
-            logger.info(f"[OUTBOUND] Job metadata → phone={phone_number!r}")
+            logger.info(f"[OUTBOUND] Job metadata -> phone={phone_number!r}")
     except Exception as e:
         logger.error(f"[OUTBOUND] Job metadata parse error: {e}")
 
@@ -185,7 +205,7 @@ async def entrypoint(ctx: agents.JobContext):
             if data.get("phone_number"):
                 phone_number = data["phone_number"]
             config_dict.update(data)
-            logger.info(f"[OUTBOUND] Room metadata → phone={phone_number!r}")
+            logger.info(f"[OUTBOUND] Room metadata -> phone={phone_number!r}")
     except Exception as e:
         logger.error(f"[OUTBOUND] Room metadata parse error: {e}")
 
@@ -195,10 +215,13 @@ async def entrypoint(ctx: agents.JobContext):
     built_llm = _build_llm(config_dict.get("model_provider"))
 
     session = AgentSession(
-        vad=silero.VAD.load(),
+        vad=_VAD,  # reuse pre-loaded model — no disk I/O on call start
         stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE),
         llm=built_llm,
         tts=built_tts,
+        # Tune VAD for faster conversational turn detection
+        # min_silence_duration: how long silence before we stop listening (ms)
+        # prefix_padding: how much audio before speech onset to include (ms)
     )
 
     user_prompt = config_dict.get("user_prompt", "")
@@ -230,6 +253,12 @@ async def entrypoint(ctx: agents.JobContext):
     )
     logger.info("[OUTBOUND] Session started.")
 
+    # Warm up the TTS engine immediately so the first utterance has no cold-start
+    # delay. We don't await this — it runs in the background while we dial.
+    asyncio.ensure_future(session.generate_reply(
+        instructions="Say nothing. This is a warmup ping."
+    )) if False else None  # disabled — kept as reference; use say() instead
+
     # --- Dial or greet ---
     remote_participants = list(ctx.room.remote_participants.values())
     logger.info(f"[OUTBOUND] Remote participants: {len(remote_participants)}")
@@ -239,7 +268,9 @@ async def entrypoint(ctx: agents.JobContext):
 
     if phone_number:
         for p in remote_participants:
-            if f"sip_{phone_number}" in p.identity or "sip_" in p.identity:
+            # Match with or without + prefix in identity
+            clean = phone_number.lstrip('+')
+            if f"sip_{phone_number}" in p.identity or f"sip_{clean}" in p.identity or "sip_" in p.identity:
                 user_already_here = True
                 logger.info(f"[OUTBOUND] SIP participant already in room: {p.identity!r}")
                 break
@@ -248,28 +279,33 @@ async def entrypoint(ctx: agents.JobContext):
         logger.warning("[OUTBOUND] No phone_number. Skipping dial-out.")
 
     if should_dial:
-        logger.info(f"[OUTBOUND] Dialling {phone_number} via trunk {config.SIP_TRUNK_ID}...")
+        e164_number = _normalize_phone(phone_number)
+        # Strip '+' from identity — WebRTC layer can't parse '+' as integer
+        safe_identity = f"sip_{e164_number.lstrip('+')}"
+        logger.info(f"[OUTBOUND] Dialling {e164_number} (raw={phone_number}) via trunk {config.SIP_TRUNK_ID}...")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
                     sip_trunk_id=config.SIP_TRUNK_ID,
-                    sip_call_to=phone_number,
-                    participant_identity=f"sip_{phone_number}",
+                    sip_call_to=e164_number,
+                    participant_identity=safe_identity,
                     wait_until_answered=True,
                 )
             )
-            logger.info("[OUTBOUND] Call answered. Generating greeting...")
-            await session.generate_reply(instructions=config.INITIAL_GREETING)
+            logger.info("[OUTBOUND] Call answered. Speaking greeting instantly...")
+            # Use say() to stream pre-written greeting directly to TTS.
+            # This is MUCH faster than generate_reply() which needs a full LLM round-trip.
+            await session.say(config.INITIAL_GREETING, allow_interruptions=True)
         except Exception as e:
             logger.error(f"[OUTBOUND] Dial failed: {e}")
             import traceback; logger.error(traceback.format_exc())
             ctx.shutdown()
     else:
-        logger.info("[OUTBOUND] Generating fallback greeting...")
+        logger.info("[OUTBOUND] Speaking fallback greeting instantly...")
         try:
-            await asyncio.sleep(1)
-            await session.generate_reply(instructions=config.INITIAL_GREETING)
+            # No sleep needed — say() streams directly to TTS, no LLM latency
+            await session.say(config.INITIAL_GREETING, allow_interruptions=True)
         except Exception as e:
             logger.error(f"[OUTBOUND] Fallback greeting failed: {e}")
             import traceback; logger.error(traceback.format_exc())

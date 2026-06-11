@@ -69,11 +69,11 @@ export default function WorkflowNodePalette({ onAddNode, isCollapsed }: Props) {
 
   return (
     <div
-      className="w-72 bg-white dark:bg-[#161b22] border-r border-gray-200 dark:border-[#30363d] flex flex-col transition-colors duration-200"
-      style={{ height: "100%", minHeight: 0 }}
+      className="w-72 bg-white dark:bg-[#161b22] border-r border-gray-200 dark:border-[#30363d] flex flex-col transition-colors duration-200 flex-shrink-0"
+      style={{ height: "100%", minHeight: 0, maxHeight: "100%" }}
     >
-      {/* Header + Search */}
-      <div className="flex-shrink-0 p-3 border-b border-gray-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] space-y-2.5">
+      {/* Header + Search — pinned at top */}
+      <div className="flex-shrink-0 p-3 border-b border-gray-200 dark:border-[#30363d] bg-white dark:bg-[#161b22] space-y-2.5 sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-gray-900 dark:text-[#e6edf3] tracking-tight">
             Node Palette
@@ -108,12 +108,19 @@ export default function WorkflowNodePalette({ onAddNode, isCollapsed }: Props) {
         </div>
       </div>
 
-      {/* Scrollable node list */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      {/* Scrollable node list — contained scroll, thin custom scrollbar */}
+      <div
+        className="flex-1 overflow-y-auto p-2 space-y-1"
+        style={{
+          scrollbarWidth: "thin",
+          scrollbarColor: "rgba(99,102,241,0.25) transparent",
+        }}
+      >
+
         {sections.length === 0 && (
           <div className="py-8 text-center">
             <Search className="w-6 h-6 text-gray-300 dark:text-[#30363d] mx-auto mb-2" />
-            <p className="text-xs text-gray-400 dark:text-[#6e7681]">No nodes match "{searchQuery}"</p>
+            <p className="text-xs text-gray-400 dark:text-[#6e7681]">No nodes match &quot;{searchQuery}&quot;</p>
           </div>
         )}
 

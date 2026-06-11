@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -39,6 +39,8 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.15.40",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^20",
     "@types/react": "^19",

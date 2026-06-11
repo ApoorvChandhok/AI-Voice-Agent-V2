@@ -5,9 +5,8 @@ import Sidebar from "@/components/Sidebar";
 import { AppProvider } from "@/components/app-provider";
 import { CopilotProvider } from "@/components/copilot/CopilotContext";
 import CopilotWidget from "@/components/copilot/CopilotWidget";
-import ProfileMenu from "@/components/ProfileMenu";
-import HeaderTitle from "@/components/HeaderTitle";
-import MouseEffect from "@/components/MouseEffect";
+import TopHeader from "@/components/TopHeader";
+import MainWrapper from "@/components/MainWrapper";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -28,23 +27,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} font-sans light-premium-bg dark:premium-bg text-gray-900 dark:text-[#e6edf3] h-screen flex overflow-hidden antialiased transition-colors duration-300`}
+        suppressHydrationWarning
+        className={`${inter.variable} font-sans text-gray-900 dark:text-[#e6edf3] h-screen w-screen overflow-hidden antialiased bg-white dark:bg-[#111111] flex`}
       >
         <CopilotProvider>
           <AppProvider>
-            {/* Ambient background orbs removed for cleaner UI */}
-            <MouseEffect />
             <Sidebar />
 
-            <div className="flex-1 flex flex-col h-full overflow-y-auto bg-white/40 dark:bg-transparent transition-colors duration-300 relative z-[1]">
-              {/* Premium glassmorphic header */}
-              <header className="h-16 glass-header flex items-center px-6 sticky top-0 z-10">
-                <HeaderTitle />
-                <ProfileMenu />
-              </header>
-
-              <main className="p-8 flex-1 page-enter">{children}</main>
+            <div className="flex-1 flex flex-col h-full overflow-y-auto relative z-[1] bg-white/40 dark:bg-transparent">
+              <TopHeader />
+              <MainWrapper>{children}</MainWrapper>
             </div>
+            
             <CopilotWidget />
           </AppProvider>
         </CopilotProvider>

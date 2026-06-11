@@ -27,7 +27,10 @@ logger = logging.getLogger("inbound-agent")
 # Import the INBOUND config directly — no routing needed
 import config_inbound as config
 
-logger.info("[INBOUND] Agent loaded → Doctor's Receptionist")
+logger.info(f"[INBOUND] Agent loaded -> {getattr(config, 'AGENT_NAME', 'Unknown')}")
+
+# Pre-load VAD model at startup (avoids cold-load delay on first call)
+_VAD = silero.VAD.load()
 
 
 # =============================================================================
@@ -229,7 +232,7 @@ async def entrypoint(ctx: agents.JobContext):
     built_llm = _build_llm()
 
     session = AgentSession(
-        vad=silero.VAD.load(),
+        vad=_VAD,  # reuse pre-loaded model — no disk I/O on call start
         stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE),
         llm=built_llm,
         tts=built_tts,
@@ -262,10 +265,10 @@ async def entrypoint(ctx: agents.JobContext):
     )
     logger.info("[INBOUND] Session started.")
 
-    # Give audio a moment to stabilise, then greet the caller
+    # Greet the caller immediately using say() which goes straight to TTS.
+    # No LLM round-trip needed for the greeting — saves 1-2 seconds.
     try:
-        await asyncio.sleep(1)
-        await session.generate_reply(instructions=config.INITIAL_GREETING)
+        await session.say(config.INITIAL_GREETING, allow_interruptions=True)
         logger.info("[INBOUND] Welcome greeting dispatched.")
     except Exception as e:
         logger.error(f"[INBOUND] Greeting failed: {e}")

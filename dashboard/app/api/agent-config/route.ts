@@ -121,6 +121,15 @@ export async function POST(req: NextRequest) {
     stored[mode] = config;
     writeConfig(stored);
 
+    // Sync Python code via the master sync script
+    try {
+      const { execSync } = require("child_process");
+      execSync("python sync_configs.py", { cwd: join(process.cwd(), "..") });
+      console.log(`[SYNC] Python config synced for ${mode}`);
+    } catch (err) {
+      console.error("Failed to sync Python file:", err);
+    }
+
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

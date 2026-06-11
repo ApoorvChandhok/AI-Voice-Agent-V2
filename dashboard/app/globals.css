@@ -23,4 +23,16 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+/* Cinematic Theme Crossfade (View Transitions API) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.8s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+/* But disable it for elements that need immediate response or handle their own transitions */
+.no-theme-transition,
+.no-theme-transition * {
+  transition: none !important;
 }

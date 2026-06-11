@@ -69,14 +69,28 @@ export default function CostGraph({ logs, customData, type = "default", brushSta
     return (
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={customData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+          <defs>
+            <linearGradient id="colorCalls" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#ec4899" stopOpacity={0.4}/>
+              <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorSip" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
+              <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorVoice" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#eab308" stopOpacity={0.4}/>
+              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" strokeOpacity={0.1} />
           <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#6b7280" }} dy={10} />
           <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#6b7280" }} dx={-10} />
           <Tooltip content={<CustomTooltipUsage />} cursor={{ stroke: '#6b7280', strokeWidth: 1, strokeDasharray: '5 5' }} />
-          <Area type="monotone" dataKey="totalCalls" name="Total Calls" stroke="#22c55e" strokeWidth={2} fillOpacity={0.1} fill="#22c55e" />
-          <Area type="monotone" dataKey="sipTrunk" name="SIP Trunk" stroke="#3b82f6" strokeWidth={2} fillOpacity={0.1} fill="#3b82f6" />
-          <Area type="monotone" dataKey="voiceApi" name="Voice API" stroke="#eab308" strokeWidth={2} fillOpacity={0.1} fill="#eab308" />
-          {customData.length > 0 && (
+          <Area type="monotone" dataKey="totalCalls" name="Total Calls" stroke="#ec4899" strokeWidth={3} fillOpacity={1} fill="url(#colorCalls)" />
+          <Area type="monotone" dataKey="sipTrunk" name="SIP Trunk" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorSip)" />
+          <Area type="monotone" dataKey="voiceApi" name="Voice API" stroke="#eab308" strokeWidth={3} fillOpacity={1} fill="url(#colorVoice)" />
+          {customData.length > 1 && (
             <Brush 
               dataKey="date" 
               height={15} 
@@ -98,16 +112,38 @@ export default function CostGraph({ logs, customData, type = "default", brushSta
     return (
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={customData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+          <defs>
+            <linearGradient id="colorCdr" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.5}/>
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorRec" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#fb923c" stopOpacity={0.5}/>
+              <stop offset="95%" stopColor="#fb923c" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorTrans" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.5}/>
+              <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorNcc" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f87171" stopOpacity={0.5}/>
+              <stop offset="95%" stopColor="#f87171" stopOpacity={0}/>
+            </linearGradient>
+            <linearGradient id="colorDid" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#c084fc" stopOpacity={0.5}/>
+              <stop offset="95%" stopColor="#c084fc" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" strokeOpacity={0.1} />
           <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#6b7280" }} dy={10} />
           <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(value) => formatCurrency(value)} dx={-10} />
           <Tooltip content={<CustomTooltipCost formatCurrency={formatCurrency} />} cursor={{ stroke: '#6b7280', strokeWidth: 1, strokeDasharray: '5 5' }} />
-          <Area type="monotone" dataKey="cdr" name="CDR" stackId="1" stroke="#3b82f6" strokeWidth={2} fillOpacity={0.3} fill="#3b82f6" />
-          <Area type="monotone" dataKey="recording" name="Recording" stackId="1" stroke="#fb923c" strokeWidth={2} fillOpacity={0.3} fill="#fb923c" />
-          <Area type="monotone" dataKey="transcription" name="Transcription" stackId="1" stroke="#2dd4bf" strokeWidth={2} fillOpacity={0.3} fill="#2dd4bf" />
-          <Area type="monotone" dataKey="ncc" name="Ncc" stackId="1" stroke="#f87171" strokeWidth={2} fillOpacity={0.3} fill="#f87171" />
-          <Area type="monotone" dataKey="didPurchase" name="DID Purchase" stackId="1" stroke="#c084fc" strokeWidth={2} fillOpacity={0.3} fill="#c084fc" />
-          {customData.length > 0 && (
+          <Area type="monotone" dataKey="cdr" name="CDR" stackId="1" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorCdr)" />
+          <Area type="monotone" dataKey="recording" name="Recording" stackId="1" stroke="#fb923c" strokeWidth={2} fillOpacity={1} fill="url(#colorRec)" />
+          <Area type="monotone" dataKey="transcription" name="Transcription" stackId="1" stroke="#2dd4bf" strokeWidth={2} fillOpacity={1} fill="url(#colorTrans)" />
+          <Area type="monotone" dataKey="ncc" name="Ncc" stackId="1" stroke="#f87171" strokeWidth={2} fillOpacity={1} fill="url(#colorNcc)" />
+          <Area type="monotone" dataKey="didPurchase" name="DID Purchase" stackId="1" stroke="#c084fc" strokeWidth={2} fillOpacity={1} fill="url(#colorDid)" />
+          {customData.length > 1 && (
             <Brush 
               dataKey="date" 
               height={15} 
@@ -151,7 +187,7 @@ export default function CostGraph({ logs, customData, type = "default", brushSta
           />
           <Bar dataKey="inbound" name="Inbound" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
           <Bar dataKey="outbound" name="Outbound" stackId="a" fill="#f97316" radius={[4, 4, 0, 0]} />
-          {customData.length > 0 && (
+          {customData.length > 1 && (
             <Brush 
               dataKey="date" 
               height={15} 
