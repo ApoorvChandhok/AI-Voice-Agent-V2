@@ -258,7 +258,9 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Warm up the TTS connection by speaking a silent space.
     # This initializes the connection and websocket early, eliminating cold-start latency when greeting.
-    asyncio.create_task(session.say(" ", allow_interruptions=True))
+    async def warm_up():
+        await session.say(" ", allow_interruptions=True)
+    asyncio.create_task(warm_up())
 
     # --- Dial or greet ---
     remote_participants = list(ctx.room.remote_participants.values())

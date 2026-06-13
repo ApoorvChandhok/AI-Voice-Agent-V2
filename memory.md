@@ -85,6 +85,12 @@
 
 ## 🪵 Immutable Change Log
 
+### [2026-06-13] - Fix Outbound Agent TTS Pre-Warming TypeError
+* **Context:** The outbound voice agent crashed when starting a new session due to a `TypeError` in `asyncio.create_task` because `session.say(...)` returns a `SpeechHandle` (an awaitable) instead of a coroutine object.
+* **Scope:**
+  - Wrapped `session.say(" ", allow_interruptions=True)` in an helper `async def warm_up()` function inside `agent_outbound.py`.
+* **Impact:** Fixed the outbound agent crash on start, enabling outbound calls to successfully connect and initiate speech.
+
 ### [2026-06-13] - Implement Dynamic Currency Conversion and Formatting Across Dashboard
 * **Context:** Changing the currency settings (INR, USD, EUR, GBP) did not update the currency formatting/symbols in the overview cards and Wallet dashboard.
 * **Scope:**
