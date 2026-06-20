@@ -7,10 +7,11 @@ interface Props {
   onCreated: () => void
 }
 
-type Step = 'details' | 'admin' | 'provisioning' | 'done'
+type Step = 'details' | 'telephony' | 'admin' | 'provisioning' | 'done'
 
 const STEPS: { id: Step; label: string }[] = [
   { id: 'details',      label: 'Workspace Details' },
+  { id: 'telephony',    label: 'Telephony Config'   },
   { id: 'admin',        label: 'Admin Account'      },
   { id: 'provisioning', label: 'Auto-Provision'     },
   { id: 'done',         label: 'Done'               },
@@ -24,6 +25,9 @@ interface FormState {
   adminName:     string
   rateOutbound:  string
   rateInbound:   string
+  sipDomain:     string
+  vobizUsername: string
+  vobizPassword: string
 }
 
 const DEFAULT_FORM: FormState = {
@@ -34,6 +38,9 @@ const DEFAULT_FORM: FormState = {
   adminName:    '',
   rateOutbound: '0.020000',
   rateInbound:  '0.010000',
+  sipDomain:    '',
+  vobizUsername: '',
+  vobizPassword: '',
 }
 
 function toSlug(name: string) {
@@ -182,6 +189,9 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
           admin_name:    form.adminName,
           rate_outbound: parseFloat(form.rateOutbound),
           rate_inbound:  parseFloat(form.rateInbound),
+          sip_domain:    form.sipDomain,
+          vobiz_username:form.vobizUsername,
+          vobiz_password:form.vobizPassword,
         }),
       })
 
@@ -257,11 +267,35 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
               </div>
               <button
                 disabled={!form.name || !form.slug}
-                onClick={() => goToStep('admin')}
+                onClick={() => goToStep('telephony')}
                 className="mt-2 w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-white/10 disabled:text-white/25 text-white text-sm font-medium transition-all"
               >
                 Continue
               </button>
+            </div>
+          )}
+
+          {/* ── Step: Telephony ── */}
+          {step === 'telephony' && (
+            <div className="flex flex-col gap-4">
+              <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs">
+                Enter the client's Vobiz SIP credentials to provision their isolated LiveKit trunks.
+              </div>
+              <Field label="SIP Domain" name="sipDomain" value={form.sipDomain} onChange={setField} placeholder="sip.vobiz.com" />
+              <Field label="Vobiz Username" name="vobizUsername" value={form.vobizUsername} onChange={setField} placeholder="client-username" />
+              <Field label="Vobiz Password" name="vobizPassword" value={form.vobizPassword} onChange={setField} type="password" placeholder="••••••••" />
+              <div className="flex gap-3 mt-2">
+                <button onClick={() => goToStep('details')} className="flex-1 py-2.5 rounded-lg border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.04] transition-all">
+                  Back
+                </button>
+                <button
+                  disabled={!form.sipDomain || !form.vobizUsername || !form.vobizPassword}
+                  onClick={() => goToStep('admin')}
+                  className="flex-1 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-white/10 disabled:text-white/25 text-white text-sm font-medium transition-all"
+                >
+                  Continue
+                </button>
+              </div>
             </div>
           )}
 
@@ -274,7 +308,7 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
               <Field label="Admin Email" name="adminEmail" value={form.adminEmail} onChange={setField} type="email" placeholder="admin@client.com" />
               <Field label="Admin Full Name" name="adminName" value={form.adminName} onChange={setField} placeholder="Jane Smith" />
               <div className="flex gap-3 mt-2">
-                <button onClick={() => goToStep('details')} className="flex-1 py-2.5 rounded-lg border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.04] transition-all">
+                <button onClick={() => goToStep('telephony')} className="flex-1 py-2.5 rounded-lg border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.04] transition-all">
                   Back
                 </button>
                 <button

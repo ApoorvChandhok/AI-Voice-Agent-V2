@@ -85,6 +85,14 @@
 
 ## 🪵 Immutable Change Log
 
+### [2026-06-20] - Fix SIP Provisioning & Super Admin Queries
+* **Context:** Workspace creation was crashing due to outdated LiveKit SDK method signatures (v2.15.0) and missing role fields in the Supabase query.
+* **Scope:**
+  - `dashboard/app/api/super-admin/workspaces/create/route.ts` — Updated SIP provisioning arguments to match the new positional requirements, forced `SIP_TRANSPORT_AUTO`, and used `new RoomConfiguration()` for dispatch rules.
+  - `dashboard/app/api/super-admin/workspaces/route.ts` — Added `role` to the Supabase select query to prevent TypeScript property access errors when mapping admin profiles.
+* **Impact:** Super admins can now successfully create workspaces and auto-provision SIP trunks without server crashes or 500 errors.
+* **Verification:** Tested API route execution manually, resolving previous provisioning crashes.
+
 ### [2026-06-18] - Workflow Canvas Infinite Panning Fix
 * **Context:** Dragging nodes toward the left or top of the canvas triggered an invisible bounding box, causing nodes to snap back to 0 or -500. This restricted the user's ability to build complex, sprawling workflows.
 * **Scope:**

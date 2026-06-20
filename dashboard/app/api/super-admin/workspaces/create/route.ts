@@ -41,6 +41,9 @@ export async function POST(request: Request) {
     admin_name,
     rate_outbound = 0.02,
     rate_inbound  = 0.01,
+    sip_domain,
+    vobiz_username,
+    vobiz_password,
   } = body
 
   if (!name || !slug || !admin_email) {
@@ -84,12 +87,12 @@ export async function POST(request: Request) {
       // 3a. Outbound trunk — routes calls FROM this workspace through Vobiz
       const outboundTrunk = await sip.createSipOutboundTrunk(
         `${slug}-outbound`,
-        process.env.VOBIZ_SIP_DOMAIN ?? '4ab08e8a.sip.vobiz.ai',
+        sip_domain || process.env.VOBIZ_SIP_DOMAIN || '4ab08e8a.sip.vobiz.ai',
         [phone_number],
         {
           transport: SIPTransport.SIP_TRANSPORT_AUTO,
-          authUsername: process.env.VOBIZ_USERNAME ?? '',
-          authPassword: process.env.VOBIZ_PASSWORD ?? '',
+          authUsername: vobiz_username || process.env.VOBIZ_USERNAME || '',
+          authPassword: vobiz_password || process.env.VOBIZ_PASSWORD || '',
         }
       )
       outboundTrunkId = outboundTrunk.sipTrunkId ?? null
@@ -139,6 +142,9 @@ export async function POST(request: Request) {
     vobiz_did_number:     phone_number ?? null,
     livekit_trunk_id:     outboundTrunkId,
     inbound_trunk_id:     inboundTrunkId,
+    sip_domain:           sip_domain ?? null,
+    vobiz_username:       vobiz_username ?? null,
+    vobiz_password:       vobiz_password ?? null,
     agent_name_outbound:  'outbound-caller',
     agent_name_inbound:   'inbound-caller',
   })
