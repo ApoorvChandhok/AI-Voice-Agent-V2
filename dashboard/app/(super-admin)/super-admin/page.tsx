@@ -6,6 +6,7 @@ import CreateWorkspaceModal from '@/components/super-admin/CreateWorkspaceModal'
 import WorkspaceDrawer from '@/components/super-admin/WorkspaceDrawer'
 import { useRouter } from 'next/navigation'
 import { setImpersonationCookie } from './actions'
+import LiveRoomsMonitor from '@/components/super-admin/LiveRoomsMonitor'
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
 function StatCard({
@@ -72,6 +73,7 @@ export default function SuperAdminPage() {
   const [deletingId, setDeletingId]           = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deleteToast, setDeleteToast]         = useState<string | null>(null)
+  const [activeTab, setActiveTab]             = useState<'workspaces' | 'live-rooms'>('workspaces')
   const router = useRouter()
 
   const handleImpersonate = async (workspaceId: string) => {
@@ -147,38 +149,58 @@ export default function SuperAdminPage() {
 
   return (
     <>
-      {/* Header */}
-      <div className="mb-8 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Workspaces</h1>
-          <p className="text-sm text-white/40 mt-0.5">
-            {workspaces.length} tenant{workspaces.length !== 1 ? 's' : ''} · 7-day billing window
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      {/* Header and Tabs */}
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-white tracking-tight">Super Admin Dashboard</h1>
+        <div className="flex gap-4 mt-6 border-b border-white/[0.08]">
           <button
-            onClick={fetchWorkspaces}
-            disabled={loading}
-            title="Refresh"
-            className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/40 hover:text-white/80 transition-all disabled:opacity-30"
+            onClick={() => setActiveTab('workspaces')}
+            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'workspaces' ? 'text-white border-violet-500' : 'text-white/40 border-transparent hover:text-white/70'}`}
           >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-              className={loading ? 'animate-spin' : ''}>
-              <path d="M11.5 2A5.5 5.5 0 1 0 12 7"/>
-              <path d="M11.5 2v3h-3"/>
-            </svg>
+            Workspaces
           </button>
           <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-all shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 active:scale-[0.98]"
+            onClick={() => setActiveTab('live-rooms')}
+            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'live-rooms' ? 'text-white border-violet-500' : 'text-white/40 border-transparent hover:text-white/70'}`}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M7 1v12M1 7h12"/>
-            </svg>
-            New Workspace
+            Live Rooms
           </button>
         </div>
       </div>
+
+      {activeTab === 'workspaces' ? (
+        <>
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Workspaces</h2>
+              <p className="text-sm text-white/40 mt-0.5">
+                {workspaces.length} tenant{workspaces.length !== 1 ? 's' : ''} · 7-day billing window
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fetchWorkspaces}
+                disabled={loading}
+                title="Refresh"
+                className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/40 hover:text-white/80 transition-all disabled:opacity-30"
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+                  className={loading ? 'animate-spin' : ''}>
+                  <path d="M11.5 2A5.5 5.5 0 1 0 12 7"/>
+                  <path d="M11.5 2v3h-3"/>
+                </svg>
+              </button>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-all shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 active:scale-[0.98]"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M7 1v12M1 7h12"/>
+                </svg>
+                New Workspace
+              </button>
+            </div>
+          </div>
 
       {/* Platform-wide stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -385,7 +407,6 @@ export default function SuperAdminPage() {
         />
       )}
 
-      {/* Delete toast */}
       {deleteToast && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium shadow-2xl backdrop-blur-sm transition-all ${
           deleteToast.startsWith('❌')
@@ -396,6 +417,10 @@ export default function SuperAdminPage() {
         }`}>
           {deleteToast}
         </div>
+      )}
+      </>
+      ) : (
+        <LiveRoomsMonitor />
       )}
     </>
   )

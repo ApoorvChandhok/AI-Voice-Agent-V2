@@ -28,19 +28,24 @@ interface FormState {
   sipDomain:     string
   vobizUsername: string
   vobizPassword: string
+  skipTelephony: boolean
 }
 
+// Allow setting string fields or the boolean skipTelephony
+type FieldValue = string | boolean
+
 const DEFAULT_FORM: FormState = {
-  name:         '',
-  slug:         '',
-  phoneNumber:  '',
-  adminEmail:   '',
-  adminName:    '',
-  rateOutbound: '0.020000',
-  rateInbound:  '0.010000',
-  sipDomain:    '',
+  name:          '',
+  slug:          '',
+  phoneNumber:   '',
+  adminEmail:    '',
+  adminName:     '',
+  rateOutbound:  '0.020000',
+  rateInbound:   '0.010000',
+  sipDomain:     '',
   vobizUsername: '',
   vobizPassword: '',
+  skipTelephony: false,
 }
 
 function toSlug(name: string) {
@@ -84,7 +89,7 @@ function Field({
   label, name, value, onChange, type = 'text', placeholder, hint, prefix,
 }: {
   label: string; name: keyof FormState; value: string;
-  onChange: (k: keyof FormState, v: string) => void;
+  onChange: (k: keyof FormState, v: FieldValue) => void;
   type?: string; placeholder?: string; hint?: string; prefix?: string;
 }) {
   return (
@@ -130,11 +135,11 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
   const [provisionWarning, setProvisionWarning] = useState<string | null>(null)
   const [provisionLog, setProvisionLog] = useState<{ text: string; status: 'done' | 'loading' | 'pending' }[]>([])
 
-  const setField = (k: keyof FormState, v: string) => {
+  const setField = (k: keyof FormState, v: FieldValue) => {
     setForm(prev => {
-      const next = { ...prev, [k]: v }
+      const next = { ...prev, [k]: v } as FormState
       // Auto-derive slug from name
-      if (k === 'name') next.slug = toSlug(v)
+      if (k === 'name' && typeof v === 'string') next.slug = toSlug(v)
       return next
     })
   }
@@ -260,7 +265,6 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
             <div className="flex flex-col gap-4">
               <Field label="Workspace Name" name="name" value={form.name} onChange={setField} placeholder="e.g. Acme Corp" />
               <Field label="Slug (URL identifier)" name="slug" value={form.slug} onChange={setField} placeholder="acme-corp" prefix="/" hint="Auto-generated from name. Lowercase, no spaces." />
-              <Field label="DID Phone Number" name="phoneNumber" value={form.phoneNumber} onChange={setField} placeholder="+918065XXXXXX" hint="The Vobiz DID number assigned to this workspace." />
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Outbound Rate ($/min)" name="rateOutbound" value={form.rateOutbound} onChange={setField} type="number" hint="What you charge the client." />
                 <Field label="Inbound Rate ($/min)" name="rateInbound" value={form.rateInbound} onChange={setField} type="number" />
@@ -278,22 +282,61 @@ export default function CreateWorkspaceModal({ onClose, onCreated }: Props) {
           {/* ── Step: Telephony ── */}
           {step === 'telephony' && (
             <div className="flex flex-col gap-4">
-              <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs">
-                Enter the client's Vobiz SIP credentials to provision their isolated LiveKit trunks.
+              {/* Architecture info banner */}
+              <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-200 text-xs space-y-1.5">
+                <p className="font-semibold text-violet-300">🏗 How isolation works</p>
+                <p>LiveKit stores the client&apos;s Vobiz credentials and creates an isolated SIP trunk. Your Python agents only need the <span className="font-mono bg-violet-900/40 px-1 rounded">trunk_id</span> — raw credentials never reach agent code.</p>
               </div>
-              <Field label="SIP Domain" name="sipDomain" value={form.sipDomain} onChange={setField} placeholder="sip.vobiz.com" />
-              <Field label="Vobiz Username" name="vobizUsername" value={form.vobizUsername} onChange={setField} placeholder="client-username" />
-              <Field label="Vobiz Password" name="vobizPassword" value={form.vobizPassword} onChange={setField} type="password" placeholder="••••••••" />
+
+              {/* Skip toggle */}
+              <label className="flex items-center gap-3 p-3 rounded-lg border border-white/[0.08] bg-white/[0.02] cursor-pointer hover:bg-white/[0.04] transition-all">
+                <input
+                  type="checkbox"
+                  checked={form.skipTelephony}
+                  onChange={e => setField('skipTelephony', e.target.checked)}
+                  className="w-4 h-4 accent-violet-500"
+                />
+                <div>
+                  <p className="text-sm text-white/80 font-medium">Skip for now</p>
+                  <p className="text-xs text-white/35">Workspace is created. Add Vobiz credentials later via workspace settings.</p>
+                </div>
+              </label>
+
+              {/* Credential fields — hidden when skipping */}
+              {!form.skipTelephony && (
+                <>
+                  <Field
+                    label="Client's DID Phone Number"
+                    name="phoneNumber"
+                    value={form.phoneNumber}
+                    onChange={setField}
+                    placeholder="+918065XXXXXX"
+                    hint="The Vobiz number purchased & KYC'd by the client."
+                  />
+                  <Field label="Vobiz SIP Domain" name="sipDomain" value={form.sipDomain} onChange={setField} placeholder="blr1.vobiz.in" hint="e.g. blr1.vobiz.in or 4ab08e8a.sip.vobiz.ai" />
+                  <Field label="Vobiz SIP Username" name="vobizUsername" value={form.vobizUsername} onChange={setField} placeholder="client-sip-username" />
+                  <Field label="Vobiz SIP Password" name="vobizPassword" value={form.vobizPassword} onChange={setField} type="password" placeholder="••••••••" />
+                  {/* Security note */}
+                  <div className="flex items-start gap-2 text-[11px] text-white/30">
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="flex-shrink-0 mt-0.5">
+                      <rect x="2" y="6" width="10" height="7" rx="1"/>
+                      <path d="M4.5 6V4a2.5 2.5 0 0 1 5 0v2"/>
+                    </svg>
+                    <span>Password is stored encrypted in Supabase and accessible only via <span className="font-mono">service_role</span>. It is never sent to the client browser.</span>
+                  </div>
+                </>
+              )}
+
               <div className="flex gap-3 mt-2">
                 <button onClick={() => goToStep('details')} className="flex-1 py-2.5 rounded-lg border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.04] transition-all">
                   Back
                 </button>
                 <button
-                  disabled={!form.sipDomain || !form.vobizUsername || !form.vobizPassword}
+                  disabled={!form.skipTelephony && (!form.sipDomain || !form.vobizUsername || !form.vobizPassword || !form.phoneNumber)}
                   onClick={() => goToStep('admin')}
                   className="flex-1 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-white/10 disabled:text-white/25 text-white text-sm font-medium transition-all"
                 >
-                  Continue
+                  {form.skipTelephony ? 'Skip & Continue' : 'Continue'}
                 </button>
               </div>
             </div>

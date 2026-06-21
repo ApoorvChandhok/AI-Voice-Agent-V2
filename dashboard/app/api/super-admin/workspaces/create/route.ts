@@ -80,29 +80,34 @@ export async function POST(request: Request) {
   let inboundTrunkId:  string | null = null
   let provisionWarning: string | null = null
 
-  if (phone_number) {
+  // ── Guard: only provision if ALL 4 Vobiz credentials are present.
+  // We NEVER fall back to global .env creds — doing so would mix tenant telecom
+  // billing and violate workspace isolation. If creds are missing, skip and warn.
+  const canProvision = !!(phone_number && sip_domain && vobiz_username && vobiz_password)
+
+  if (canProvision) {
     try {
       const sip = getSipClient()
 
-      // 3a. Outbound trunk — routes calls FROM this workspace through Vobiz
+      // 3a. Outbound trunk — routes calls FROM this workspace through their Vobiz account
       const outboundTrunk = await sip.createSipOutboundTrunk(
         `${slug}-outbound`,
-        sip_domain || process.env.VOBIZ_SIP_DOMAIN || '4ab08e8a.sip.vobiz.ai',
+        sip_domain,           // client's own SIP domain — no .env fallback
         [phone_number],
         {
-          transport: SIPTransport.SIP_TRANSPORT_AUTO,
-          authUsername: vobiz_username || process.env.VOBIZ_USERNAME || '',
-          authPassword: vobiz_password || process.env.VOBIZ_PASSWORD || '',
+          transport:    SIPTransport.SIP_TRANSPORT_AUTO,
+          authUsername: vobiz_username,  // client's own credentials
+          authPassword: vobiz_password,  // client's own credentials
         }
       )
       outboundTrunkId = outboundTrunk.sipTrunkId ?? null
 
-      // 3b. Inbound trunk — receives calls TO this workspace's DID
+      // 3b. Inbound trunk — receives calls TO this workspace's DID number
       const inboundTrunk = await sip.createSipInboundTrunk(
         `${slug}-inbound`,
         [phone_number],
         {
-          // Allow calls from any IP (Vobiz doesn't use a fixed egress IP)
+          // Allow calls from any IP (Vobiz doesn't publish a fixed egress IP)
           allowedAddresses: [],
         }
       )
@@ -110,15 +115,16 @@ export async function POST(request: Request) {
 
       // 3c. Dispatch rule — routes inbound calls on this trunk to the shared
       //     inbound-caller agent, embedding workspace_id in room metadata so
-      //     the agent knows which tenant's config to load.
+      //     the agent knows which tenant config to load from Supabase.
       if (inboundTrunkId) {
         await sip.createSipDispatchRule(
-          // Rule: each call gets its own room with a workspace-scoped prefix
           { type: 'individual', roomPrefix: `ws-${businessId.slice(0, 8)}-` },
           {
             name:     `${slug}-dispatch`,
             trunkIds: [inboundTrunkId],
             roomConfig: new RoomConfiguration({
+              // workspace_id in metadata = the key the Python agent uses to fetch
+              // this workspace's config via get_workspace_config() RPC
               metadata: JSON.stringify({ workspace_id: businessId }),
             }),
           }
@@ -126,14 +132,16 @@ export async function POST(request: Request) {
       }
     } catch (livekitErr) {
       // Non-fatal — workspace is created, trunks can be provisioned manually later.
-      // Surface a warning in the response so the UI can show it.
       console.error('[create-workspace] LiveKit provisioning failed:', livekitErr)
       provisionWarning = livekitErr instanceof Error
         ? livekitErr.message
         : 'LiveKit provisioning failed — trunks will need to be set up manually.'
     }
+  } else if (phone_number) {
+    // Has a phone number but missing other credentials — partial input, warn clearly
+    provisionWarning = 'Telephony skipped: SIP domain, username, or password is missing. Credentials saved — provision trunks manually in workspace settings.'
   } else {
-    provisionWarning = 'No DID number provided — LiveKit trunks skipped. Add a phone number later to enable calling.'
+    provisionWarning = 'Telephony skipped: no DID number provided. Add Vobiz credentials later via workspace settings to enable calling.'
   }
 
   // ── 4. Save workspace_config (with trunk IDs if provisioned) ─────────────────

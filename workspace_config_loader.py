@@ -116,6 +116,43 @@ def _supabase_get(path: str, params: dict = None) -> Optional[dict]:
     return None
 
 
+def _supabase_rpc(function_name: str, params: dict) -> Optional[dict]:
+    """
+    Synchronous Supabase RPC call (POST to /rest/v1/rpc/<function_name>).
+    Used to call security-definer Postgres functions that enforce RLS safely.
+    Returns parsed JSON or None on error.
+    """
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    if not url or not key:
+        return None
+
+    import urllib.parse
+    body = json.dumps(params).encode("utf-8")
+    req = urllib.request.Request(
+        f"{url}/rest/v1/rpc/{function_name}",
+        data=body,
+        method="POST",
+        headers={
+            "apikey":        key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body_resp = resp.read().decode("utf-8")
+            return json.loads(body_resp)
+    except urllib.error.HTTPError as e:
+        logger.error(f"[WorkspaceLoader] RPC {function_name} HTTP {e.code}: {e.read().decode()}")
+    except Exception as e:
+        logger.error(f"[WorkspaceLoader] RPC {function_name} failed: {e}")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Static fallback — reads existing data/agent_config.json just like before
 # ---------------------------------------------------------------------------
@@ -224,16 +261,17 @@ async def load_workspace_config(
         )
     )
 
-    # ── 2. Fetch workspace_config row (SIP trunks) ──────────────────────────
-    ws_cfg_rows = await loop.run_in_executor(
+    # ── 2. Fetch workspace SIP config via the secure RPC (get_workspace_config)
+    #    This calls a SECURITY DEFINER function defined in the migration:
+    #    20260621000000_vobiz_tenant_isolation.sql
+    #
+    #    The function DELIBERATELY omits vobiz_password from its return set.
+    #    Agents only need trunk_id + sip_domain — they never see raw credentials.
+    ws_cfg_result = await loop.run_in_executor(
         None,
-        lambda: _supabase_get(
-            "workspace_config",
-            {
-                "select":      "livekit_trunk_id,inbound_trunk_id,sip_domain,transfer_number",
-                "business_id": f"eq.{workspace_id}",
-                "limit":       "1",
-            },
+        lambda: _supabase_rpc(
+            "get_workspace_config",
+            {"p_business_id": workspace_id},
         )
     )
 
@@ -252,8 +290,9 @@ async def load_workspace_config(
 
     # ── 4. Unpack rows ──────────────────────────────────────────────────────
     agent_row = agent_cfg_rows[0] if isinstance(agent_cfg_rows, list) and agent_cfg_rows else None
-    ws_row    = ws_cfg_rows[0]    if isinstance(ws_cfg_rows,   list) and ws_cfg_rows   else None
-    biz_row   = biz_rows[0]       if isinstance(biz_rows,      list) and biz_rows       else None
+    # RPC returns a single dict (not a list), or None on failure
+    ws_row    = ws_cfg_result if isinstance(ws_cfg_result, dict) else None
+    biz_row   = biz_rows[0]   if isinstance(biz_rows,      list) and biz_rows       else None
 
     if not agent_row:
         logger.warning(
@@ -305,18 +344,27 @@ async def load_workspace_config(
             else:
                 result.system_prompt += f"\n## {res.get('name', 'Resource')}\n{res.get('value', '')}\n"
 
-    # SIP trunk IDs from workspace_config table
+    # SIP trunk IDs from the workspace_config table (via get_workspace_config RPC).
+    # We do NOT fall back to .env vars here — if a workspace has been provisioned
+    # with its own trunks, using a global fallback trunk would route calls through
+    # the wrong Vobiz account and mix tenant billing.
     if ws_row:
-        result.outbound_trunk_id = ws_row.get("livekit_trunk_id") or os.getenv("VOBIZ_SIP_TRUNK_ID")
-        result.inbound_trunk_id  = ws_row.get("inbound_trunk_id") or os.getenv("INBOUND_TRUNK_ID")
-        result.sip_domain        = ws_row.get("sip_domain")       or os.getenv("VOBIZ_SIP_DOMAIN")
-        result.transfer_number   = result.transfer_number or ws_row.get("transfer_number") or os.getenv("DEFAULT_TRANSFER_NUMBER")
+        result.outbound_trunk_id = ws_row.get("livekit_trunk_id")  # None if not provisioned yet
+        result.inbound_trunk_id  = ws_row.get("inbound_trunk_id")  # None if not provisioned yet
+        result.sip_domain        = ws_row.get("sip_domain")
+        result.transfer_number   = result.transfer_number or ws_row.get("transfer_number")
+        if not result.outbound_trunk_id:
+            logger.warning(
+                f"[WorkspaceLoader] workspace={workspace_id!r} has no outbound trunk yet — "
+                "telephony not provisioned. Calls will fail until trunks are set up."
+            )
     else:
-        # No workspace_config row — use .env as last resort
-        result.outbound_trunk_id = os.getenv("VOBIZ_SIP_TRUNK_ID")
-        result.inbound_trunk_id  = os.getenv("INBOUND_TRUNK_ID")
-        result.sip_domain        = os.getenv("VOBIZ_SIP_DOMAIN")
-        result.transfer_number   = result.transfer_number or os.getenv("DEFAULT_TRANSFER_NUMBER")
+        # No workspace_config row at all — workspace may not have completed setup.
+        # Log a warning but do NOT inject global .env trunks.
+        logger.warning(
+            f"[WorkspaceLoader] No workspace_config row found for workspace_id={workspace_id!r}. "
+            "Telephony disabled for this session."
+        )
 
     logger.info(
         f"[WorkspaceLoader] ✅ Loaded from DB — workspace={result.business_name!r} "
