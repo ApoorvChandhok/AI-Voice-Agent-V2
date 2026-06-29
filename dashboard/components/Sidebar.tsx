@@ -265,6 +265,7 @@ export default function Sidebar() {
         {isCollapsed ? (
           <>
             <button
+              suppressHydrationWarning
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
             >
@@ -311,6 +312,7 @@ export default function Sidebar() {
             {/* Right side: hamburger — pushed to the far right */}
             <div className="flex items-center gap-1 ml-auto shrink-0">
               <button
+                suppressHydrationWarning
                 onClick={() => setIsCollapsed(!isCollapsed)}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors shrink-0"
               >

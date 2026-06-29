@@ -78,6 +78,7 @@ export async function POST(request: Request) {
   // The LiveKit account is shared (ours); resources are isolated per workspace.
   let outboundTrunkId: string | null = null
   let inboundTrunkId:  string | null = null
+  let dispatchRuleId:  string | null = null
   let provisionWarning: string | null = null
 
   // ── Guard: only provision if ALL 4 Vobiz credentials are present.
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
       //     inbound-caller agent, embedding workspace_id in room metadata so
       //     the agent knows which tenant config to load from Supabase.
       if (inboundTrunkId) {
-        await sip.createSipDispatchRule(
+        const dispatchRule = await sip.createSipDispatchRule(
           { type: 'individual', roomPrefix: `ws-${businessId.slice(0, 8)}-` },
           {
             name:     `${slug}-dispatch`,
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
             }),
           }
         )
+        dispatchRuleId = dispatchRule.sipDispatchRuleId ?? null
       }
     } catch (livekitErr) {
       // Non-fatal — workspace is created, trunks can be provisioned manually later.
@@ -150,6 +152,7 @@ export async function POST(request: Request) {
     vobiz_did_number:     phone_number ?? null,
     livekit_trunk_id:     outboundTrunkId,
     inbound_trunk_id:     inboundTrunkId,
+    dispatch_rule_id:     dispatchRuleId,
     sip_domain:           sip_domain ?? null,
     vobiz_username:       vobiz_username ?? null,
     vobiz_password:       vobiz_password ?? null,

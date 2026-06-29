@@ -201,7 +201,7 @@ def main():
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
 
-    mode = sys.argv[1] if len(sys.argv) > 1 else "dev"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "start"
     cwd = Path(__file__).parent
 
     # Setup log directory and file
@@ -228,13 +228,37 @@ def main():
     log_file.write(f"{'─' * 70}\n\n")
     log_file.flush()
 
-    def spawn_process(name, script, color):
+    def kill_port(port: int):
+        """Kill any process listening on the given port (Windows-safe)."""
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True
+            )
+            for line in result.stdout.splitlines():
+                if f":{port}" in line and "LISTENING" in line:
+                    parts = line.strip().split()
+                    pid = int(parts[-1])
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True)
+                    log(YELLOW, "RUN", f"Killed stale PID {pid} on port {port}")
+        except Exception as e:
+            log(YELLOW, "RUN", f"Port {port} cleanup skipped: {e}")
+
+    # Pre-flight: clear both agent ports before spawning
+    log(CYAN, "RUN", "Clearing ports 8081 and 8082...")
+    kill_port(8081)
+    kill_port(8082)
+    time.sleep(0.5)
+
+    def spawn_process(name, script, color, port: int = 8081):
         prefix_ansi = f"{color}{BOLD}[{name.upper()}]{RESET}"
-        prefix_plain = f"[{name.upper()}]"
-        log(color, name.upper(), f"Spawning {script} ...")
+        log(color, name.upper(), f"Spawning {script} (port {port}) ...")
         
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
+        # Note: agent port is set in WorkerOptions inside each agent file
+        # (inbound=8082, outbound=8081) — not configurable via CLI or env var
 
         proc = subprocess.Popen(
             [sys.executable, "-u", script, mode],
@@ -259,13 +283,16 @@ def main():
         threads.append(t)
         return proc
 
+    # Store port assignments for restart
+    PORT_MAP = {"outbound": 8081, "inbound": 8082}
+
     try:
-        # Spawn Outbound Agent
-        spawn_process("outbound", "agent_outbound.py", GREEN)
+        # Spawn Outbound Agent on port 8081
+        spawn_process("outbound", "agent_outbound.py", GREEN, port=8081)
         time.sleep(0.5)
 
-        # Spawn Inbound Agent
-        spawn_process("inbound", "agent_inbound.py", CYAN)
+        # Spawn Inbound Agent on port 8082 (avoids collision with outbound)
+        spawn_process("inbound", "agent_inbound.py", CYAN, port=8082)
 
         print()
         log(BOLD, "RUN", f"Both agents running. Press {BOLD}Ctrl+C{RESET} to stop.")
@@ -280,7 +307,7 @@ def main():
                     color = GREEN if name == "outbound" else CYAN
                     log(RED, name.upper(), f"Process exited with code {ret}. Restarting...")
                     script = f"agent_{name}.py"
-                    spawn_process(name, script, color)
+                    spawn_process(name, script, color, port=PORT_MAP[name])
 
     except KeyboardInterrupt:
         print()

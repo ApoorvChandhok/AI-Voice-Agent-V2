@@ -5,10 +5,11 @@ import {
   Bot, Save, RotateCcw, Plus, Trash2, Link2, FileText, Upload,
   Mic, Volume2, Brain, Wrench, Phone, ChevronDown, ChevronUp,
   CheckCircle, AlertCircle, Loader2, Sparkles, Globe, Settings2,
-  MessageSquare, Zap, X, RefreshCw, Play, StopCircle
+  MessageSquare, Zap, X, RefreshCw, Play, StopCircle, Eye
 } from "lucide-react";
 import type { ProviderCatalog, VoiceOption, ModelOption } from "@/lib/providers";
 import { FALLBACK_CATALOG, STT_LANGUAGES } from "@/lib/providers";
+import FileViewerModal from "@/components/FileViewerModal";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 interface Resource {
@@ -25,7 +26,7 @@ interface CustomFunction {
 
 interface AgentConfig {
   agent_name: string;
-  gender: "male" | "female";
+  gender: "male" | "female" | "neutral";
   call_description: string;
   system_prompt: string;
   initial_greeting: string;
@@ -220,11 +221,13 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState<Record<string, boolean>>({});
 
-  // Resource add form state
   const [newResourceType, setNewResourceType] = useState<"url" | "text">("url");
   const [newResourceName, setNewResourceName] = useState("");
   const [newResourceValue, setNewResourceValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // File viewer modal
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   // Voice preview state
   const [previewState, setPreviewState] = useState<"idle" | "loading" | "playing">("idle");
@@ -455,6 +458,7 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
   const modeColorClass = mode === "inbound" ? "from-indigo-500 to-blue-500" : "from-purple-500 to-indigo-500";
 
   return (
+    <>
     <div className="space-y-5 max-w-4xl mx-auto pb-10 relative">
       {/* Toast notification */}
       {toast && (
@@ -653,6 +657,16 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
                 <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-200 dark:bg-[#30363d] text-gray-500 dark:text-[#8b949e]">
                   {res.type}
                 </span>
+                {/* View button — only for file resources */}
+                {res.type === "file" && (
+                  <button
+                    onClick={() => setViewingFile(res.name)}
+                    title="View file content"
+                    className="p-1 text-gray-300 dark:text-[#484f58] hover:text-indigo-500 dark:hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={() => removeResource(idx)}
                   className="p-1 text-gray-300 dark:text-[#484f58] hover:text-red-500 dark:hover:text-[#da3633] opacity-0 group-hover:opacity-100 transition-all"
@@ -751,7 +765,11 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
                 // Auto-select first voice & model for the new provider
                 const voices = catalog.tts[v]?.voices ?? [];
                 const models = catalog.tts[v]?.models ?? [];
-                if (voices.length > 0) update("tts_voice", voices[0].value);
+                if (voices.length > 0) {
+                  update("tts_voice", voices[0].value);
+                  update("agent_name", voices[0].label);
+                  if (voices[0].gender) update("gender", voices[0].gender);
+                }
                 if (models.length > 0) update("tts_model", models[0].value);
               }}
               options={ttsProviderOptions}
@@ -777,7 +795,15 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
                 <Select
                   id="tts_voice"
                   value={config.tts_voice}
-                  onChange={(v) => { update("tts_voice", v); stopPreview(); }}
+                  onChange={(v) => { 
+                    update("tts_voice", v); 
+                    stopPreview(); 
+                    const selectedVoice = ttsVoices.find(voice => voice.value === v);
+                    if (selectedVoice) {
+                      update("agent_name", selectedVoice.label);
+                      if (selectedVoice.gender) update("gender", selectedVoice.gender);
+                    }
+                  }}
                   options={ttsVoices.map(v => ({
                     value: v.value,
                     label: v.gender ? `${v.label} (${v.gender === "female" ? "♀" : v.gender === "male" ? "♂" : "◈"})` : v.label
@@ -1075,5 +1101,24 @@ export default function AgentConfigForm({ mode }: { mode: "inbound" | "outbound"
         </div>
       )}
     </div>
+
+      {/* File viewer modal — rendered outside the scrollable div */}
+      {viewingFile && (
+        <FileViewerModal
+          mode={mode}
+          fileName={viewingFile}
+          onClose={() => setViewingFile(null)}
+          onDeleted={(name) => {
+            // Also remove from the resources list so it's in sync
+            if (config) {
+              const resources = config.resources.filter(
+                (r) => !(r.type === 'file' && r.name === name)
+              );
+              update('resources', resources);
+            }
+          }}
+        />
+      )}
+    </>
   );
 }

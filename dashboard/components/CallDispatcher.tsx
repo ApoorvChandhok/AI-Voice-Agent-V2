@@ -6,7 +6,7 @@ import type { ProviderCatalog, VoiceOption, ModelOption } from '@/lib/providers'
 import { FALLBACK_CATALOG, STT_LANGUAGES } from '@/lib/providers';
 
 export default function CallDispatcher() {
-    const [phoneNumber, setPhoneNumber] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('+91');
     const [prompt, setPrompt] = useState('');
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');

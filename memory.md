@@ -77,6 +77,85 @@
 | File | Scope | Contains |
 |------|-------|----------|
 | `.env` (root) | **Backend Python only** | LiveKit, Deepgram, Groq, Sarvam, Vobiz/SIP credentials |
+# Project Memory & System Architecture
+
+## 🏗️ Core Architecture & System Flow
+
+### System Design
+**Dual-Agent Microservice + Next.js Dashboard** — The system consists of two independent Python voice agents (inbound & outbound) that communicate via LiveKit's real-time infrastructure, orchestrated by a Next.js 16 dashboard. Configuration is bridged through a shared JSON file (`data/agent_config.json`).
+
+### Tech Stack
+| Layer | Technology |
+|-------|-----------|
+| **Voice Agents** | Python 3.x, LiveKit Agents SDK (≥0.8.0), LiveKit API (≥0.6.0) |
+| **STT (Speech-to-Text)** | Deepgram Nova-2 |
+| **TTS (Text-to-Speech)** | Sarvam AI (Bulbul v2 — Indian voices), Cartesia (Sonic-2), Deepgram Aura, OpenAI TTS-1 |
+| **LLM** | Groq (Llama 3.3 70B Versatile) via OpenAI-compatible API |
+| **VAD (Voice Activity Detection)** | Silero VAD (pre-loaded at startup) |
+| **Telephony / SIP** | Vobiz SIP Trunking (outbound + inbound) |
+| **Dashboard** | Next.js 16, React 19, TypeScript, TailwindCSS 4, Framer Motion |
+| **UI Components** | React Aria, Lucide Icons, Recharts, react-globe.gl |
+| **AI Copilot** | Groq SDK + Vercel AI SDK (in-dashboard chat) |
+| **Auth** | Google OAuth (Gmail integration for contacts) |
+| **Data Storage** | JSON files (`data/agent_config.json`, `data/call_logs.json`, `data/workflows.json`), CSV (`data/leads.csv`) |
+| **Noise Cancellation** | LiveKit BVC Telephony plugin |
+
+### Data Flow
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          SYSTEM DATA FLOW                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Dashboard (Next.js)                                                    │
+│    ├─ User configures agent → POST /api/agent-config                   │
+│    │   └─ Writes to data/agent_config.json                             │
+│    ├─ User initiates call → POST /api/dispatch                         │
+│    │   └─ LiveKit API → creates room + dispatches agent                │
+│    ├─ User views logs → GET /api/leads, /api/recordings                │
+│    │   └─ Reads from data/call_logs.json, data/leads.csv               │
+│    └─ Copilot chat → POST /api/copilot                                 │
+│        └─ Groq LLM for in-app AI assistant                             │
+│                                                                         │
+│  Python Voice Agents                                                    │
+│    ├─ On each call: reload data/agent_config.json                      │
+│    ├─ LiveKit room ←→ SIP trunk (Vobiz) ←→ PSTN phone                │
+│    ├─ STT (Deepgram) → LLM (Groq) → TTS (Sarvam/Cartesia)           │
+│    └─ On disconnect: analytics.py → data/call_logs.json + leads.csv   │
+│                                                                         │
+│  Config Bridge                                                          │
+│    data/agent_config.json is the shared state between                   │
+│    dashboard (writes) and Python agents (reads on each call)           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Core Modules
+
+| File / Directory | Description |
+|-----------------|-------------|
+| `run.py` | Entry point — spawns both `agent_outbound.py` and `agent_inbound.py` as subprocesses with auto-restart |
+| `agent_outbound.py` | Outbound voice agent (Priya @ Spinny) — dials out via SIP, handles sales conversations |
+| `agent_inbound.py` | Inbound voice agent (Doctor's Receptionist) — answers calls, captures leads, qualifies intent |
+| `config_outbound.py` | Outbound agent configuration — system prompt, TTS/STT/LLM settings, loads dashboard overrides |
+| `config_inbound.py` | Inbound agent configuration — same pattern as outbound, different persona |
+| `analytics.py` | Post-call analytics — saves leads to CSV, analyzes transcripts via Groq, writes to `call_logs.json` |
+| `sync_configs.py` | Syncs configuration between dashboard and agent config files |
+| `dashboard/` | Next.js 16 dashboard with Sidebar, CRM, Dialer, Workflow Builder, Wallet, and AI Copilot |
+| `dashboard/app/api/` | API routes: agent-config, auth, copilot, dispatch, generate-workflow, leads, queue, recordings, send-email |
+| `dashboard/components/` | React components: Sidebar, LeadsCRM, AgentConfigForm, BulkDialer, CallDispatcher, WalletDashboard, etc. |
+| `dashboard/lib/` | Server utilities: actions.ts, workflow engine, expression engine, Groq analyzer |
+| `data/` | Runtime data store — agent_config.json, call_logs.json, leads.csv, workflows.json |
+| `logs/` | Runtime log files — timestamped backend/frontend logs with auto-generated error summaries |
+| `tester_agent.py` | Self-testing agent — verifies backend imports, env vars, frontend build, and scans logs for errors |
+| `log_runner.py` | Log-capturing wrapper — runs backend/frontend with full stdout/stderr logging and summary generation |
+
+---
+
+## 🔧 Environment Configuration
+
+| File | Scope | Contains |
+|------|-------|----------|
+| `.env` (root) | **Backend Python only** | LiveKit, Deepgram, Groq, Sarvam, Vobiz/SIP credentials |
 | `dashboard/.env.local` | **Frontend Next.js only** | NEXT_PUBLIC_* vars, LiveKit (for API routes), Groq (for copilot), Google OAuth |
 
 > **Rule:** Never put `NEXT_PUBLIC_*` vars in root `.env`. Never put Vobiz/SIP credentials in `dashboard/.env.local`.
@@ -84,6 +163,14 @@
 ---
 
 ## 🪵 Immutable Change Log
+
+### [2026-06-28] - Pipeline & Network Latency Optimizations
+* **Context:** Voice agent had perceptible latency in the pipeline (User → Vobiz → LiveKit → Deepgram → Gemini → Sarvam → User). Batch-style processing, long silence thresholds, verbose LLM outputs, and an older STT model all contributed to sluggish response times.
+* **Scope:**
+  - `agent_outbound.py` + `agent_inbound.py` — **STT Model Upgrade:** Auto-upgrade from Deepgram `nova-2` → `nova-3` (faster real-time streaming WebSocket transcription). **Turn Handling:** Added `TurnHandlingOptions` with `min_delay=400ms` endpointing (telephony sweet spot), `max_delay=1500ms` safety cap, and `adaptive` interruption mode that clears the TTS audio buffer immediately on user barge-in. **VAD Tuning:** Added `activation_threshold=0.3` to Silero VAD for more sensitive speech onset detection. **Sarvam TTS:** Changed hardcoded fallback from `bulbul:v1` → `bulbul:v3` for lower latency and better voice quality. **Prompt Engineering:** Injected mandatory telephony voice rules into both agent system prompts — forces 1-2 sentence brevity, natural conversational fillers ("Got it", "Sure"), TTS-safe number/date/currency spelling, and short-clause pacing.
+  - `workspace_config_loader.py` — Updated default `stt_model` from `nova-2` → `nova-3` in both the `WorkspaceAgentConfig` dataclass defaults and the DB row unpacking fallbacks.
+* **Impact:** Expected ~200-400ms reduction in end-to-end response latency. Agent now sounds more human (short, punchy replies with fillers) instead of essay-like. Interruption handling is instant — user can barge in mid-speech and the bot stops immediately. STT streaming is word-by-word, not batch.
+* **Verification:** Code-level review of LiveKit SDK docs confirming `TurnHandlingOptions`, `endpointing`, and `interruption` parameter compatibility with `livekit-agents>=0.8.0`.
 
 ### [2026-06-20] - Multi-Tenant Vobiz Isolation & Credential Storage (Phase 6)
 * **Context:** The system previously relied on global Vobiz SIP credentials loaded from environment variables, which prevented per-tenant SIP trunk provisioning required for a multi-tenant SaaS architecture.
@@ -153,7 +240,7 @@
 
 ### [2026-06-14] - Fix Sarvam bulbul:v3 Incompatible Speaker Crash
 * **Context:** Outbound agent crashed on every call with `ValueError: Speaker 'aravind' is not compatible with model 'bulbul:v3'`. Sarvam updated `bulbul:v3` to a new speaker list that dropped `anushka`, `aravind`, `amartya`, `dhruv`, `meera`, `pavithra`, `maitreyi`, `arvind`, `arjun`, `abhilash`.
-* **Valid bulbul:v3 speakers:** shubh, ritu, rahul, pooja, simran, kavya, amit, ratan, rohan, dev, ishita, shreya, manan, sumit, priya, aditya, kabir, neha, varun, roopa, aayan, ashutosh, advait, amelia, sophia.
+* **Valid bulbul:v3 speakers:** shubh, ritu, rahul, pooja, simran, kavya, amit, ratan, rohan, dev, ishita, shreya, manan, sumit, priya, aditya, kabir, neha, varun, roopa, aayan, ashutosh, advait.
 * **Scope:**
   - `config_outbound.py` — Updated `DEFAULT_TTS_VOICE` from `"aravind"` → `"rahul"`. Updated `fetch_sarvam_voices()` fallback list to only valid bulbul:v3 speakers.
   - `config_inbound.py` — Updated `DEFAULT_TTS_VOICE` from `"anushka"` → `"ishita"`.

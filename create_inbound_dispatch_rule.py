@@ -55,8 +55,9 @@ async def main():
                 pin="",                  # no PIN required
             )
         ),
-        # agent_name tells LiveKit which worker to auto-dispatch into the new room
-        agent_name="inbound-caller",
+        room_config=api.RoomConfiguration(
+            agents=[api.RoomAgentDispatch(agent_name="inbound-caller")]
+        )
     )
 
     try:

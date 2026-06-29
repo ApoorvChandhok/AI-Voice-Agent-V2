@@ -23,6 +23,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 import urllib.request
 import urllib.error
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("workspace-config-loader")
 
@@ -46,7 +49,7 @@ class WorkspaceAgentConfig:
 
     # STT
     stt_provider: str                  = "deepgram"
-    stt_model: str                     = "nova-2"
+    stt_model: str                     = "nova-3"
     stt_language: str                  = "auto"
 
     # TTS
@@ -319,7 +322,7 @@ async def load_workspace_config(
         initial_greeting = agent_row.get("initial_greeting", ""),
         fallback_greeting= agent_row.get("fallback_greeting",""),
         stt_provider     = agent_row.get("stt_provider",     "deepgram"),
-        stt_model        = agent_row.get("stt_model",        "nova-2"),
+        stt_model        = agent_row.get("stt_model",        "nova-3"),
         stt_language     = agent_row.get("stt_language",     "auto"),
         tts_provider     = agent_row.get("tts_provider",     "sarvam"),
         tts_voice        = agent_row.get("tts_voice",        "ishita"),

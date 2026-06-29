@@ -240,7 +240,7 @@ export default function SuperAdminPage() {
             <div key={i} className="grid grid-cols-[1.5fr_1fr_1fr_1fr_1fr_1fr_90px_120px] border-b border-white/[0.04] animate-pulse">
               {Array.from({ length: 8 }).map((_, j) => (
                 <div key={j} className="px-4 py-4">
-                  <div className="h-3 rounded bg-white/[0.06]" style={{ width: `${60 + Math.random() * 30}%` }}/>
+                  <div className="h-3 rounded bg-white/[0.06]" style={{ width: `${60 + ((i * 7 + j * 13) % 30)}%` }}/>
                 </div>
               ))}
             </div>

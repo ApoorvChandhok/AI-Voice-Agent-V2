@@ -61,8 +61,6 @@ export const FALLBACK_CATALOG: ProviderCatalog = {
         { value: "kavya", label: "Kavya", gender: "female", language: "Indian" },
         { value: "ritu", label: "Ritu", gender: "female", language: "Indian" },
         { value: "roopa", label: "Roopa", gender: "female", language: "Indian" },
-        { value: "amelia", label: "Amelia", gender: "female", language: "Indian" },
-        { value: "sophia", label: "Sophia", gender: "female", language: "Indian" },
         { value: "rahul", label: "Rahul", gender: "male", language: "Indian" },
         { value: "rohan", label: "Rohan", gender: "male", language: "Indian" },
         { value: "ratan", label: "Ratan", gender: "male", language: "Indian" },
@@ -194,9 +192,19 @@ export const FALLBACK_CATALOG: ProviderCatalog = {
     google: {
       label: "Google (Gemini)",
       models: [
-        { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-        { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
-        { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash" },
+        // ── Gemini 2.5 family — up to 2M context ──
+        { value: "gemini-2.5-pro",           label: "Gemini 2.5 Pro (2M ctx) ⭐" },
+        { value: "gemini-2.5-flash",         label: "Gemini 2.5 Flash (1M ctx) — Best for voice" },
+        { value: "gemini-2.5-flash-preview", label: "Gemini 2.5 Flash Preview" },
+        // ── Gemini 2.0 family — 1M context ──
+        { value: "gemini-2.0-flash",         label: "Gemini 2.0 Flash (1M ctx)" },
+        { value: "gemini-2.0-flash-exp",     label: "Gemini 2.0 Flash Experimental" },
+        // ── Gemini 1.5 family — stable / GA ──
+        { value: "gemini-1.5-pro",           label: "Gemini 1.5 Pro (2M ctx)" },
+        { value: "gemini-1.5-pro-latest",    label: "Gemini 1.5 Pro Latest (2M ctx)" },
+        { value: "gemini-1.5-flash",         label: "Gemini 1.5 Flash (1M ctx)" },
+        { value: "gemini-1.5-flash-latest",  label: "Gemini 1.5 Flash Latest (1M ctx)" },
+        { value: "gemini-1.5-flash-8b",      label: "Gemini 1.5 Flash 8B (Fast / Low cost)" },
       ],
     },
   },

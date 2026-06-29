@@ -86,6 +86,56 @@ async function fetchOpenAIModels(apiKey: string) {
   }
 }
 
+// ── Google Gemini model fetcher ─────────────────────────────────────────────
+async function fetchGeminiModels(apiKey: string) {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`,
+      { signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+    const json = await res.json();
+    const models: any[] = json.models ?? [];
+
+    // Human-readable context labels
+    const ctxLabel = (tokens: number) => {
+      if (tokens >= 2_000_000) return "2M ctx";
+      if (tokens >= 1_000_000) return "1M ctx";
+      if (tokens >= 128_000)   return "128K ctx";
+      return `${Math.round(tokens / 1000)}K ctx`;
+    };
+
+    // Filter to text-generation models only, newest first
+    const chat = models
+      .filter((m: any) =>
+        m.supportedGenerationMethods?.includes("generateContent") &&
+        !m.name.includes("embedding") &&
+        !m.name.includes("aqa") &&
+        !m.name.includes("vision")
+      )
+      .sort((a: any, b: any) => {
+        // Sort 2.5 > 2.0 > 1.5 etc by name descending
+        return (b.name ?? "").localeCompare(a.name ?? "", undefined, { numeric: true });
+      })
+      .map((m: any) => {
+        const id = m.name.replace("models/", "");
+        const ctx = m.inputTokenLimit ? ` (${ctxLabel(m.inputTokenLimit)})` : "";
+        const friendly = id
+          .replace(/gemini-/i, "Gemini ")
+          .replace(/-/g, " ")
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        // Mark recommended voice model
+        const star = id === "gemini-2.5-flash" ? " — Best for voice" : "";
+        return { value: id, label: `${friendly}${ctx}${star}` };
+      });
+
+    return chat.length > 0 ? chat : null;
+  } catch (e) {
+    console.warn("[providers] Gemini model fetch failed, using fallback:", e);
+    return null;
+  }
+}
+
 // ── Cartesia voice fetcher ────────────────────────────────────────────────────
 async function fetchCartesiaVoices(apiKey: string) {
   try {
@@ -163,19 +213,21 @@ export async function GET() {
   }
 
   const env = loadRootEnv();
-  const sarvamKey = env.SARVAM_API_KEY ?? process.env.SARVAM_API_KEY ?? "";
-  const groqKey = env.GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? "";
-  const openaiKey = env.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
+  const sarvamKey   = env.SARVAM_API_KEY   ?? process.env.SARVAM_API_KEY   ?? "";
+  const groqKey     = env.GROQ_API_KEY     ?? process.env.GROQ_API_KEY     ?? "";
+  const openaiKey   = env.OPENAI_API_KEY   ?? process.env.OPENAI_API_KEY   ?? "";
   const cartesiaKey = env.CARTESIA_API_KEY ?? process.env.CARTESIA_API_KEY ?? "";
   const deepgramKey = env.DEEPGRAM_API_KEY ?? process.env.DEEPGRAM_API_KEY ?? "";
+  const googleKey   = env.GEMINI_API_KEY   ?? process.env.GEMINI_API_KEY   ?? env.GOOGLE_API_KEY ?? process.env.GOOGLE_API_KEY ?? "";
 
   // Fetch all providers in parallel
-  const [sarvamVoices, groqModels, openaiModels, cartesiaVoices, deepgramData] = await Promise.all([
-    sarvamKey ? fetchSarvamVoices(sarvamKey) : Promise.resolve(null),
-    groqKey ? fetchGroqModels(groqKey) : Promise.resolve(null),
-    openaiKey ? fetchOpenAIModels(openaiKey) : Promise.resolve(null),
+  const [sarvamVoices, groqModels, openaiModels, cartesiaVoices, deepgramData, geminiModels] = await Promise.all([
+    sarvamKey   ? fetchSarvamVoices(sarvamKey)   : Promise.resolve(null),
+    groqKey     ? fetchGroqModels(groqKey)       : Promise.resolve(null),
+    openaiKey   ? fetchOpenAIModels(openaiKey)   : Promise.resolve(null),
     cartesiaKey ? fetchCartesiaVoices(cartesiaKey) : Promise.resolve(null),
     deepgramKey ? fetchDeepgramModels(deepgramKey) : Promise.resolve({ sttModels: null, ttsVoices: null }),
+    googleKey   ? fetchGeminiModels(googleKey)   : Promise.resolve(null),
   ]);
 
   // Merge live data with fallbacks
@@ -184,6 +236,7 @@ export async function GET() {
   if (sarvamVoices) catalog.tts.sarvam.voices = sarvamVoices;
   if (groqModels) catalog.llm.groq.models = groqModels;
   if (openaiModels) catalog.llm.openai.models = openaiModels;
+  if (geminiModels) catalog.llm.google.models = geminiModels;
   if (cartesiaVoices && cartesiaVoices.length > 0) catalog.tts.cartesia.voices = cartesiaVoices;
   if (deepgramData?.sttModels) catalog.stt.deepgram.models = deepgramData.sttModels;
   if (deepgramData?.ttsVoices && deepgramData.ttsVoices.length > 0) catalog.tts.deepgram.voices = deepgramData.ttsVoices;
@@ -195,6 +248,7 @@ export async function GET() {
       sarvam_voices: !!sarvamVoices,
       groq_models: !!groqModels,
       openai_models: !!openaiModels,
+      gemini_models: !!geminiModels,
       cartesia_voices: !!cartesiaVoices,
       deepgram_models: !!(deepgramData?.sttModels || deepgramData?.ttsVoices),
     },

@@ -27,6 +27,19 @@ export async function DELETE(request: Request, context: any) {
 
         console.log(`[KILL] Super admin ${user.email} terminating room: ${roomName}`);
 
+        // ── STEP 0: Read room metadata BEFORE deleting (to get workspace_id) ───
+        let workspaceId: string | null = null;
+        try {
+            const rooms = await roomService.listRooms([roomName]);
+            const room = rooms?.[0];
+            if (room?.metadata) {
+                const meta = JSON.parse(room.metadata);
+                workspaceId = meta.workspace_id || meta.business_id || null;
+            }
+        } catch (e) {
+            console.warn('[KILL] Could not read room metadata:', e);
+        }
+
         // ── STEP 1: Remove all participants first (this kills SIP/phone calls) ──
         // Just deleting the room does NOT hang up the phone call.
         // We must explicitly remove each participant so LiveKit sends BYE to the SIP trunk.
@@ -58,6 +71,22 @@ export async function DELETE(request: Request, context: any) {
                 process.env.NEXT_PUBLIC_SUPABASE_URL!,
                 process.env.SUPABASE_SERVICE_ROLE_KEY!
             );
+
+            // If metadata didn't have workspace_id, try resolving from room name pattern:
+            // ws-{first8hexOfUUID}-{timestamp}
+            if (!workspaceId) {
+                const roomMatch = roomName.match(/^ws-([a-f0-9]{8})-/i);
+                if (roomMatch) {
+                    const prefix = roomMatch[1]; // e.g. "11111111"
+                    const { data: ws } = await supabaseAdmin
+                        .from('businesses')
+                        .select('id')
+                        .ilike('id', `${prefix}%`)
+                        .single();
+                    if (ws) workspaceId = ws.id;
+                }
+            }
+
             const { error: auditError } = await supabaseAdmin.from("admin_audit_log").insert({
                 action: 'kill_room',
                 actor_id: user.id,
@@ -66,6 +95,7 @@ export async function DELETE(request: Request, context: any) {
                     room_name: roomName,
                     participants_removed: participantCount,
                     timestamp: new Date().toISOString(),
+                    ...(workspaceId && { workspace_id: workspaceId }),
                 },
             });
             if (auditError) console.error("[KILL] Audit log failed:", auditError);

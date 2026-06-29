@@ -3,12 +3,15 @@ import certifi
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
 import logging
+import logging.handlers
 import json
 import asyncio
+import datetime
+import re
 from dotenv import load_dotenv
 
 from livekit import agents, api
-from livekit.agents import AgentSession, Agent, RoomInputOptions
+from livekit.agents import AgentSession, Agent, TurnHandlingOptions
 from livekit.plugins import openai, cartesia, deepgram, noise_cancellation, silero, sarvam
 try:
     from livekit.plugins import google as google_plugin
@@ -18,14 +21,14 @@ except ImportError:
 from livekit.agents import llm
 from typing import Optional
 
-load_dotenv(".env")
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
 
 
 def _normalize_phone(number: str) -> str:
     """Ensure phone is in E.164 format. Defaults to +91 for 10-digit Indian numbers."""
     if not number:
         return number
-    # Strip whitespace and any existing formatting
     number = number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if number.startswith("+"):
         return number  # Already E.164
@@ -33,14 +36,36 @@ def _normalize_phone(number: str) -> str:
         return f"+{number}"  # 91XXXXXXXXXX -> +91XXXXXXXXXX
     if len(number) == 10:
         return f"+91{number}"  # 10-digit Indian mobile
-    # Fallback: just prepend +
     return f"+{number}"
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S"
+
+# ── Logging setup: console + rotating daily file ──────────────────────────────
+os.makedirs("logs", exist_ok=True)
+_log_fmt = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_log_fmt)
+_console_handler.setLevel(logging.DEBUG)
+
+_file_handler = logging.handlers.TimedRotatingFileHandler(
+    filename=os.path.join("logs", "outbound.log"),
+    when="midnight",
+    interval=1,
+    backupCount=14,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(_log_fmt)
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.suffix = "%Y%m%d"  # e.g. outbound.log.20260623
+
+logging.root.setLevel(logging.DEBUG)
+logging.root.handlers = []
+logging.root.addHandler(_console_handler)
+logging.root.addHandler(_file_handler)
+
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
 logging.getLogger("livekit").setLevel(logging.INFO)
 logger = logging.getLogger("outbound-agent")
@@ -51,8 +76,11 @@ from workspace_config_loader import load_workspace_config, WorkspaceAgentConfig
 logger.info("[OUTBOUND] Agent initialized")
 
 # Pre-load VAD model at startup so it's ready instantly when a call arrives
-# (avoids ~1-2s cold-load delay on first call)
-_VAD = silero.VAD.load()
+# Setting min_silence_duration to 0.2s for faster interruption response
+_VAD = silero.VAD.load(
+    min_silence_duration=0.2,
+    activation_threshold=0.3,   # Lower threshold = more sensitive to speech onset
+)
 
 
 # =============================================================================
@@ -67,7 +95,7 @@ def _build_tts(ws_config: WorkspaceAgentConfig, provider_override: str = None, v
         "shubh", "ritu", "rahul", "pooja", "simran", "kavya", "amit",
         "ratan", "rohan", "dev", "ishita", "shreya", "manan", "sumit",
         "priya", "aditya", "kabir", "neha", "varun", "roopa", "aayan",
-        "ashutosh", "advait", "amelia", "sophia",
+        "ashutosh", "advait",
     }
     if voice_override in _SARVAM_VOICES:
         provider = "sarvam"
@@ -75,62 +103,103 @@ def _build_tts(ws_config: WorkspaceAgentConfig, provider_override: str = None, v
     if provider == "cartesia":
         return cartesia.TTS(
             model=os.getenv("CARTESIA_TTS_MODEL", "sonic-english"),
-            voice=os.getenv("CARTESIA_TTS_VOICE", "248be419-c632-4f23-adf1-5324ed7dbf1d"),
+            voice=voice_override or os.getenv("CARTESIA_TTS_VOICE", "248be419-c632-4f23-adf1-5324ed7dbf1d"),
         )
     if provider == "sarvam":
-        model    = os.getenv("SARVAM_TTS_MODEL", "bulbul:v1")
-        voice    = voice_override or os.getenv("SARVAM_VOICE", ws_config.tts_voice)
-        language = language_override or os.getenv("SARVAM_LANGUAGE", ws_config.tts_language)
+        model    = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+        voice    = voice_override or ws_config.tts_voice or os.getenv("SARVAM_VOICE", "ishita")
+        language = language_override or ws_config.tts_language or os.getenv("SARVAM_LANGUAGE", "en-IN")
         logger.info(f"[TTS] Sarvam -- model={model}, speaker={voice}, lang={language}")
         return sarvam.TTS(model=model, speaker=voice, target_language_code=language)
     if provider == "deepgram":
-        return deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en"))
-    if os.getenv("OPENAI_API_KEY"):
+        # Deepgram uses model names for voices (e.g. aura-asteria-en)
+        voice = voice_override or os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en")
+        logger.info(f"[TTS] Deepgram -- model={voice}")
+        return deepgram.TTS(model=voice)
+    if provider == "openai" or os.getenv("OPENAI_API_KEY"):
+        voice = voice_override or os.getenv("OPENAI_TTS_VOICE", ws_config.tts_voice)
+        logger.info(f"[TTS] OpenAI -- voice={voice}")
         return openai.TTS(
             model=os.getenv("OPENAI_TTS_MODEL", "tts-1"),
-            voice=voice_override or os.getenv("OPENAI_TTS_VOICE", ws_config.tts_voice),
+            voice=voice,
         )
+    
+    # Fallback to Deepgram
     return deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en"))
+
+
+# Supported Gemini model catalog with context window metadata
+# Listed largest-context first so GEMINI_MODEL env var can override any
+_GEMINI_CATALOG: dict[str, str] = {
+    # Gemini 2.5 family — up to 2M context
+    "gemini-2.5-pro":             "gemini-2.5-pro",
+    "gemini-2.5-pro-preview":     "gemini-2.5-pro-preview-06-05",
+    "gemini-2.5-flash":           "gemini-2.5-flash",
+    "gemini-2.5-flash-preview":   "gemini-2.5-flash-preview-05-20",
+    # Gemini 2.0 family — up to 1M context
+    "gemini-2.0-flash":           "gemini-2.0-flash",
+    "gemini-2.0-flash-exp":       "gemini-2.0-flash-exp",
+    # Gemini 1.5 family (stable/GA) — up to 2M context
+    "gemini-1.5-pro":             "gemini-1.5-pro",
+    "gemini-1.5-pro-latest":      "gemini-1.5-pro-latest",
+    "gemini-1.5-flash":           "gemini-1.5-flash",
+    "gemini-1.5-flash-latest":    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-8b":        "gemini-1.5-flash-8b",
+}
 
 
 def _build_llm(ws_config: WorkspaceAgentConfig, provider_override: str = None):
     provider = (provider_override or os.getenv("LLM_PROVIDER", ws_config.llm_provider)).lower()
 
     if provider == "groq":
-        logger.info("[LLM] Groq")
+        model = os.getenv("GROQ_MODEL", ws_config.llm_model)
+        logger.info(f"[LLM] Groq — model={model}")
         return openai.LLM(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
-            model=os.getenv("GROQ_MODEL", ws_config.llm_model),
+            model=model,
             temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
         )
 
     if provider in ("google", "gemini"):
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key and _HAS_GOOGLE:
-            logger.info("[LLM] Google Gemini")
-            return google_plugin.LLM(
-                model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        # Accept either GEMINI_API_KEY or GOOGLE_API_KEY
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        env_model    = os.getenv("GEMINI_MODEL", "").strip()
+        config_model = ws_config.llm_model.strip().lower()
+        gemini_model = (
+            env_model
+            or _GEMINI_CATALOG.get(config_model)
+            or (ws_config.llm_model if "gemini" in config_model else None)
+            or "gemini-2.5-flash"
+        )
+        if gemini_key:
+            # Use Gemini's OpenAI-compatible endpoint for maximum stability and lower latency
+            logger.info(f"[LLM] Google Gemini (OpenAI endpoint) — model={gemini_model}")
+            return openai.LLM(
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
                 api_key=gemini_key,
+                model=gemini_model,
+                temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
             )
-        logger.warning("[LLM] Google requested but plugin/key not available — falling back to Groq")
+        logger.warning("[LLM] Google requested but no API key found — falling back to Groq")
 
     if provider == "openai":
         openai_key = os.getenv("OPENAI_API_KEY")
         if openai_key:
-            logger.info("[LLM] OpenAI")
+            model = os.getenv("OPENAI_MODEL", ws_config.llm_model)
+            logger.info(f"[LLM] OpenAI — model={model}")
             return openai.LLM(
                 api_key=openai_key,
-                model=os.getenv("OPENAI_MODEL", ws_config.llm_model),
+                model=model,
             )
         logger.warning("[LLM] OpenAI requested but OPENAI_API_KEY not set — falling back to Groq")
 
-    # Safe default: Groq (always configured)
-    logger.info("[LLM] Groq (default fallback)")
+    # Last-resort fallback: Groq
+    logger.info("[LLM] Groq (last-resort fallback)")
     return openai.LLM(
         base_url="https://api.groq.com/openai/v1",
         api_key=os.getenv("GROQ_API_KEY"),
-        model=os.getenv("GROQ_MODEL", ws_config.llm_model),
+        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
     )
 
@@ -146,6 +215,7 @@ class OutboundTools(llm.ToolContext):
         self.ws_config = ws_config
         self.phone_number = phone_number
         self.agent_session: Optional[AgentSession] = None
+        self._unhandled_turns: int = 0  # Safety net: track consecutive unhandled turns
 
     @llm.function_tool(
         description=(
@@ -174,21 +244,38 @@ class OutboundTools(llm.ToolContext):
         logger.info(f"[TOOL] lookup_user: {phone}")
         return "User found: Shreyas Raj. Status: Premium. Last order: Coffee setup (Delivered)."
 
-    @llm.function_tool(description="Transfer the call to a human support agent or another number.")
+    @llm.function_tool(
+        description=(
+            "ALWAYS call this tool the moment the customer says anything like "
+            "'I want to talk to a person', 'connect me to someone', 'can I speak to a human', "
+            "'I don't want to talk to a bot', 'get me a real person', or similar — regardless "
+            "of their tone (calm, curious, or angry). Also call when: the customer is "
+            "frustrated/upset and de-escalation isn't working; a question falls outside known "
+            "offers or specs and needs a specialist; or the customer explicitly asks for a callback. "
+            "DO NOT pass a destination unless the customer gives you a specific number. "
+            "Leave destination blank to use the default transfer number. "
+            "This tool MUST be called — never hang up without invoking it first."
+        )
+    )
     async def transfer_call(self, destination: Optional[str] = None):
-        """Transfer the call. Args: destination: SIP URI or phone number."""
+        """Transfer to a human agent. Args: destination: optional override phone number ONLY (leave blank by default)."""
         target = destination or self.ws_config.transfer_number
         if not target:
-            return "Error: No default transfer number configured."
+            return "Error: No default transfer number configured. Please contact support."
 
+        target = re.sub(r'\s+', '', target)
         if "@" not in target:
             if self.ws_config.sip_domain:
                 clean = target.replace("tel:", "").replace("sip:", "")
-                target = f"sip:{clean}@{self.ws_config.sip_domain}"
+                # Encode the + sign for SIP URI compatibility with Vobiz
+                clean_encoded = clean.replace("+", "%2B")
+                target = f"sip:{clean_encoded}@{self.ws_config.sip_domain}"
             elif not target.startswith("tel:"):
                 target = f"tel:{target}"
         elif not target.startswith("sip:"):
             target = f"sip:{target}"
+
+        logger.info(f"[TOOL] Transfer target resolved to: {target}")
 
         participant_identity = None
         for p in self.ctx.room.remote_participants.values():
@@ -205,20 +292,40 @@ class OutboundTools(llm.ToolContext):
         if not participant_identity:
             return "Failed to transfer: could not identify the caller."
 
-        try:
-            await self.ctx.api.sip.transfer_sip_participant(
-                api.TransferSIPParticipantRequest(
-                    room_name=self.ctx.room.name,
-                    participant_identity=participant_identity,
-                    transfer_to=target,
-                    play_dialtone=False,
+        async def delayed_transfer():
+            await asyncio.sleep(6.0)
+            try:
+                lk_api = api.LiveKitAPI()
+                await lk_api.sip.transfer_sip_participant(
+                    api.TransferSIPParticipantRequest(
+                        room_name=self.ctx.room.name,
+                        participant_identity=participant_identity,
+                        transfer_to=target,
+                        play_dialtone=True,
+                    )
                 )
-            )
-            logger.info(f"[TOOL] Transfer initiated to {target}")
-            return "Transfer initiated successfully."
-        except Exception as e:
-            logger.error(f"[TOOL] Transfer failed: {e}")
-            return f"Error executing transfer: {e}"
+                await lk_api.aclose()
+                logger.info(f"[TOOL] Successfully executed delayed transfer to {target}")
+                await asyncio.sleep(1.0)
+                try:
+                    await self.ctx.room.disconnect()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"[TOOL] Delayed transfer failed: {e}")
+                # Try to speak a fallback message if transfer fails
+                if self.agent_session:
+                    try:
+                        await self.agent_session.say(
+                            "Sorry, I wasn't able to connect you right now. Our team will call you back shortly.",
+                            allow_interruptions=False
+                        )
+                    except Exception:
+                        pass
+
+        asyncio.create_task(delayed_transfer())
+        # Return immediately — agent speaks this line while the transfer fires in background
+        return "Sure thing — one moment while I connect you to someone from our team. Please hold!"
 
 
 # =============================================================================
@@ -235,15 +342,39 @@ class OutboundAssistant(Agent):
         else:
             instructions = ws_config.system_prompt
             
+        # ── Telephony voice style prompt (latency optimization) ──
         instructions += (
-            "\n\nCRITICAL LANGUAGE INSTRUCTION: If the user explicitly asks you to speak a different language, "
-            "or consistently starts speaking in a different language (e.g., Hindi instead of English), "
-            "you MUST call the `change_spoken_language` tool to switch your TTS engine to their language code "
-            "(like 'hi-IN'). After calling the tool, reply to them entirely in that new language."
+            "\n\n## TELEPHONY VOICE RULES (MANDATORY):\n"
+            "You are speaking on a live telephone call, NOT writing a chat message.\n"
+            "1. BREVITY: Your responses must be 1 or 2 short sentences MAX. Never use bullet points, numbered lists, or bold markdown.\n"
+            "2. FILLERS: Occasionally use natural fillers like 'Got it,' 'Sure,' 'Right,' or 'Let me check that for you' at the start of your responses.\n"
+            "3. TTS SAFETY: Never write symbols, dates, numbers, or currencies as digits. "
+            "Spell them out in words. Write 'five hundred rupees' not '₹500'. Write 'twelfth of May, twenty twenty-six' not '12/05/2026'. "
+            "Never use asterisks, hashtags, or any markdown formatting.\n"
+            "4. PACING: Speak in short clauses. Use commas and periods to create natural pauses.\n"
+        )
+
+        instructions += (
+            "\n\nCRITICAL MULTILINGUAL INSTRUCTION: Your Text-to-Speech engine is strict. "
+            "If the user speaks Hindi or any language other than English, you MUST call the `change_spoken_language` tool "
+            "with the correct language code (e.g. 'hi-IN') BEFORE you reply in that language! "
+            "If you generate Hindi text without calling the tool first, the audio engine will crash and the call will drop. "
+            "IMPORTANT TO REDUCE DELAYS: ONLY call this tool if you actually need to switch languages. If you are already speaking Hindi, DO NOT call the tool again, just reply immediately!"
         )
             
         if tts_language and "en" not in tts_language.lower():
             instructions += f"\n\nCRITICAL: Your current target language is '{tts_language}'. You MUST speak entirely in this language code. Do NOT speak English."
+
+        instructions += (
+            "\n\nCRITICAL — HUMAN TRANSFER RULE (overrides everything else): "
+            "If the customer says ANYTHING like 'I want to talk to a person', 'connect me to someone', "
+            "'can I speak to a human', 'I don't want to talk to a bot', or any similar phrasing — "
+            "in ANY tone, calm or angry — you MUST immediately call `transfer_call`. "
+            "Do NOT ask clarifying questions first. Do NOT offer alternatives first. "
+            "Just say 'Sure thing, one moment' and call the tool. "
+            "NEVER end the call without either calling `transfer_call` or logging a callback. "
+            "Hanging up without transferring is never acceptable."
+        )
             
         super().__init__(instructions=instructions, tools=tools)
 
@@ -298,17 +429,38 @@ async def entrypoint(ctx: agents.JobContext):
     )
     built_llm = _build_llm(ws_config, config_dict.get("model_provider"))
 
-    # Support dynamic language detection or code-switching if set to 'auto'
     is_auto = (ws_config.stt_language == "auto")
+    # Use Deepgram's 'hi' model which natively supports excellent Hinglish (fluent English + Hindi).
+    # This prevents auto-detection delays and false-interruption bugs when switching languages.
+    stt_lang = "hi" if is_auto or "en" in ws_config.stt_language else ws_config.stt_language
+
+    # Resolve STT model
+    stt_model = ws_config.stt_model
+
     session = AgentSession(
         vad=_VAD,  # reuse pre-loaded model — no disk I/O on call start
         stt=deepgram.STT(
-            model=ws_config.stt_model,
-            language=ws_config.stt_language if not is_auto else "en-US",
-            detect_language=is_auto,
+            base_url="wss://api.deepgram.com/v1/listen",
+            model=stt_model,
+            language=stt_lang,
+            interim_results=True,
+            smart_format=True,
         ),
         llm=built_llm,
         tts=built_tts,
+        # ── Latency-optimized turn handling ──
+        # 400ms min_delay = agent responds quickly after user pauses
+        # Adaptive interruption = clears TTS buffer when user speaks over the bot
+        turn_handling=TurnHandlingOptions(
+            turn_detection="server_vad",
+            endpointing={
+                "min_delay": 400,    # 400ms silence → assume user is done (telephony sweet spot)
+                "max_delay": 1500,   # Safety cap — force turn closure after 1.5s
+            },
+            interruption={
+                "mode": "adaptive",  # Clear audio buffer immediately on user barge-in
+            },
+        ),
     )
     
     # Link session to tools for dynamic language switching
@@ -321,6 +473,12 @@ async def entrypoint(ctx: agents.JobContext):
         user_prompt=user_prompt,
         tts_language=config_dict.get("tts_language")
     )
+    
+    # Capitalize the voice ID so it displays nicely (e.g. "Ishita" instead of "ishita")
+    raw_voice_id = config_dict.get("voice_id", "")
+    agent_name = raw_voice_id.capitalize() if raw_voice_id else "AI Agent"
+    if hasattr(ctx.room.local_participant, "update_name"):
+        await ctx.room.local_participant.update_name(agent_name)
 
     @ctx.room.on("disconnected")
     def on_disconnected(*args, **kwargs):
@@ -335,21 +493,9 @@ async def entrypoint(ctx: agents.JobContext):
             )
         )
 
-    await session.start(
-        room=ctx.room,
-        agent=agent_instance,
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVCTelephony(),
-            close_on_disconnect=True,
-        ),
-    )
+    # Note: RoomInputOptions removed to prevent deprecation warnings and access violation bugs with Rust core
+    await session.start(agent_instance, room=ctx.room)
     logger.info("[OUTBOUND] Session started.")
-
-    # Warm up the TTS connection by speaking a silent space.
-    # This initializes the connection and websocket early, eliminating cold-start latency when greeting.
-    async def warm_up():
-        await session.say(" ", allow_interruptions=True)
-    asyncio.create_task(warm_up())
 
     # --- Dial or greet ---
     remote_participants = list(ctx.room.remote_participants.values())
@@ -385,9 +531,9 @@ async def entrypoint(ctx: agents.JobContext):
                     wait_until_answered=True,
                 )
             )
-            logger.info("[OUTBOUND] Call answered. Speaking greeting instantly...")
-            # Use say() to stream pre-written greeting directly to TTS.
-            # This is MUCH faster than generate_reply() which needs a full LLM round-trip.
+            logger.info("[OUTBOUND] Call answered. Speaking greeting...")
+            # Give the WebRTC stream a brief moment to stabilise after SIP answer
+            await asyncio.sleep(1.5)
             await session.say(ws_config.initial_greeting, allow_interruptions=True)
         except Exception as e:
             logger.error(f"[OUTBOUND] Dial failed: {e}")
@@ -396,11 +542,11 @@ async def entrypoint(ctx: agents.JobContext):
     else:
         logger.info("[OUTBOUND] Speaking fallback greeting instantly...")
         try:
-            # No sleep needed — say() streams directly to TTS, no LLM latency
             await session.say(ws_config.initial_greeting, allow_interruptions=True)
         except Exception as e:
             logger.error(f"[OUTBOUND] Fallback greeting failed: {e}")
             import traceback; logger.error(traceback.format_exc())
+
 
 
 if __name__ == "__main__":

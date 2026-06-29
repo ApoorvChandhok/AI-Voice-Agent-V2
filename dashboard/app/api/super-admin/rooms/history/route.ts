@@ -20,7 +20,6 @@ export async function GET() {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        // Use service role to bypass RLS on audit log
         const { createClient: createSupabaseClient } = await import('@supabase/supabase-js');
         const adminClient = createSupabaseClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,8 +38,122 @@ export async function GET() {
 
         if (killErr) throw killErr;
 
-        // Pull room creation events from call_logs (if table exists)
-        // Fallback gracefully if the table doesn't exist
+        // ── Fetch all workspaces + their DID numbers in one round-trip ───────────
+        const { data: allWorkspaces } = await adminClient
+            .from('businesses')
+            .select('id, name');
+
+        const { data: allConfigs } = await adminClient
+            .from('workspace_config')
+            .select('business_id, vobiz_did_number');
+
+        // id → name
+        const workspaceById: Record<string, string> = {};
+        for (const ws of allWorkspaces ?? []) {
+            workspaceById[ws.id] = ws.name;
+        }
+
+        // First-8-hex-chars of UUID (no hyphens) → name  (for ws- room names)
+        // e.g. businessId = "11111111-2222-..." → prefixMap["11111111"] = "RapidX"
+        const prefixMap: Record<string, string> = {};
+        for (const ws of allWorkspaces ?? []) {
+            const raw8 = ws.id.replace(/-/g, '').slice(0, 8).toLowerCase();
+            prefixMap[raw8] = ws.name;
+        }
+
+        // DID number (digits only, no +/spaces) → { workspaceName, didFormatted }
+        // e.g. "918065480288" → { workspaceName: "RapidX", didFormatted: "+918065480288" }
+        const didMap: Record<string, { workspaceName: string; didFormatted: string }> = {};
+        for (const cfg of allConfigs ?? []) {
+            if (cfg.vobiz_did_number && cfg.business_id) {
+                const digits = cfg.vobiz_did_number.replace(/\D/g, '');
+                const name = workspaceById[cfg.business_id] ?? 'Unknown';
+                const formatted = cfg.vobiz_did_number.startsWith('+')
+                    ? cfg.vobiz_did_number
+                    : `+${digits}`;
+                didMap[digits] = { workspaceName: name, didFormatted: formatted };
+            }
+        }
+
+        // ── Resolve workspace + DID from room name ───────────────────────────────
+        //
+        // Pattern A — outbound / tenant rooms:
+        //   ws-{first8hexChars}-{timestamp}
+        //   → workspace from prefixMap
+        //   → DID from workspace_config via business_id
+        //
+        // Pattern B — inbound rooms:
+        //   inbound-_{digitString}_{suffix}
+        //   → the digit string IS the DID number dialled by the caller
+        //   → workspace from didMap
+
+        const resolveRoom = (
+            wsIdFromAudit: string | undefined | null,
+            roomName: string
+        ): { workspaceName: string; didNumber: string | null } => {
+
+            // 1. Direct workspace_id saved in audit log
+            if (wsIdFromAudit && workspaceById[wsIdFromAudit]) {
+                const ws = workspaceById[wsIdFromAudit];
+                // Find the DID for this workspace from configs
+                const cfg = (allConfigs ?? []).find(c => c.business_id === wsIdFromAudit);
+                const did = cfg?.vobiz_did_number
+                    ? (cfg.vobiz_did_number.startsWith('+') ? cfg.vobiz_did_number : `+${cfg.vobiz_did_number.replace(/\D/g, '')}`)
+                    : null;
+                return { workspaceName: ws, didNumber: did };
+            }
+
+            // 2. Pattern B: inbound-_{digits}_{suffix}
+            //    The digits = DID number that the caller dialled → look up in didMap
+            const inboundMatch = roomName?.match(/^inbound-_(\d+)_/i);
+            if (inboundMatch) {
+                const digits = inboundMatch[1];
+                const entry = didMap[digits];
+                if (entry) {
+                    return { workspaceName: entry.workspaceName, didNumber: entry.didFormatted };
+                }
+                // DID found but no workspace match — still show the DID
+                return { workspaceName: 'Unknown', didNumber: `+${digits}` };
+            }
+
+            // 3. Pattern A: ws-{8hexChars}-{timestamp}
+            const wsMatch = roomName?.match(/^ws-([a-f0-9]{8})-/i);
+            if (wsMatch) {
+                const prefix = wsMatch[1].toLowerCase();
+                const wsName = prefixMap[prefix];
+                if (wsName) {
+                    // Find config for this workspace to get DID
+                    const bizId = (allWorkspaces ?? []).find(w =>
+                        w.id.replace(/-/g, '').slice(0, 8).toLowerCase() === prefix
+                    )?.id;
+                    const cfg = bizId ? (allConfigs ?? []).find(c => c.business_id === bizId) : undefined;
+                    const did = cfg?.vobiz_did_number
+                        ? (cfg.vobiz_did_number.startsWith('+') ? cfg.vobiz_did_number : `+${cfg.vobiz_did_number.replace(/\D/g, '')}`)
+                        : null;
+                    return { workspaceName: wsName, didNumber: did };
+                }
+            }
+
+            return { workspaceName: 'Unknown', didNumber: null };
+        };
+
+        const enrichedKills = (killEvents ?? []).map((ev) => {
+            const wsId = ev.metadata?.workspace_id || ev.metadata?.business_id;
+            const { workspaceName, didNumber } = resolveRoom(wsId, ev.target);
+            return {
+                id: ev.id,
+                type: 'kill' as const,
+                roomName: ev.target,
+                workspaceName,
+                didNumber,
+                actorId: ev.actor_id,
+                participantsRemoved: ev.metadata?.participants_removed ?? 0,
+                timestamp: ev.created_at,
+                metadata: ev.metadata,
+            };
+        });
+
+        // Pull call_logs and enrich with workspace name + DID
         let callLogs: any[] = [];
         try {
             const { data, error } = await adminClient
@@ -49,38 +162,19 @@ export async function GET() {
                 .gte('started_at', since)
                 .order('started_at', { ascending: false })
                 .limit(200);
-            if (!error && data) callLogs = data;
+            if (!error && data) {
+                callLogs = data.map((log: any) => {
+                    const { workspaceName, didNumber } = resolveRoom(log.workspace_id, log.room_name);
+                    return {
+                        ...log,
+                        workspace_name: workspaceName,
+                        did_number: didNumber,
+                    };
+                });
+            }
         } catch (_) { /* table may not exist */ }
 
-        // Enrich kill events with workspace names
-        const workspaceCache: Record<string, string> = {};
-        const enrichedKills = await Promise.all((killEvents ?? []).map(async (ev) => {
-            const wsId = ev.metadata?.workspace_id;
-            if (wsId && !workspaceCache[wsId]) {
-                const { data: ws } = await supabase
-                    .from('businesses')
-                    .select('name')
-                    .eq('id', wsId)
-                    .single();
-                if (ws) workspaceCache[wsId] = ws.name;
-            }
-            return {
-                id: ev.id,
-                type: 'kill' as const,
-                roomName: ev.target,
-                workspaceName: workspaceCache[wsId] ?? 'Unknown',
-                actorId: ev.actor_id,
-                participantsRemoved: ev.metadata?.participants_removed ?? 0,
-                timestamp: ev.created_at,
-                metadata: ev.metadata,
-            };
-        }));
-
-        return NextResponse.json({
-            killEvents: enrichedKills,
-            callLogs,
-            since,
-        });
+        return NextResponse.json({ killEvents: enrichedKills, callLogs, since });
 
     } catch (error: any) {
         console.error('[Room History] Error:', error);
