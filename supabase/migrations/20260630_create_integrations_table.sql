@@ -10,6 +10,8 @@
 --   https://supabase.com/dashboard/project/yqvjwcinaefmxjhcojak/sql
 -- =============================================================================
 
+DROP TABLE IF EXISTS public.integrations CASCADE;
+
 CREATE TABLE IF NOT EXISTS public.integrations (
   id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id  TEXT         NOT NULL,
