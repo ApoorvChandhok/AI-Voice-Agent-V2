@@ -136,63 +136,78 @@ _GEMINI_CATALOG: dict[str, str] = {
 def _build_llm(ws_config: WorkspaceAgentConfig, provider_override: str = None):
     provider = (provider_override or os.getenv("LLM_PROVIDER", ws_config.llm_provider)).lower()
 
-    if provider == "groq":
-        model = os.getenv("GROQ_MODEL", ws_config.llm_model)
-        logger.info(f"[LLM] Groq — model={model}")
-        return openai.LLM(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY"),
-            model=model,
-            temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
-        )
-
-    if provider in ("google", "gemini"):
-        # Accept either GEMINI_API_KEY or GOOGLE_API_KEY
-        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        env_model    = os.getenv("GEMINI_MODEL", "").strip()
-        config_model = ws_config.llm_model.strip().lower()
-        gemini_model = (
-            env_model
-            or _GEMINI_CATALOG.get(config_model)
-            or (ws_config.llm_model if "gemini" in config_model else None)
-            or "gemini-2.5-flash-latest"
-        )
-        if gemini_key and _HAS_GOOGLE:
-            logger.info(f"[LLM] Google Gemini (native plugin) — model={gemini_model}")
-            return google_plugin.LLM(
-                model=gemini_model,
-                api_key=gemini_key,
+    def get_groq():
+        if os.getenv("GROQ_API_KEY"):
+            model = os.getenv("GROQ_MODEL", ws_config.llm_model if provider == "groq" else "llama-3.3-70b-versatile")
+            logger.info(f"[LLM] Added Groq to fallback sequence — model={model}")
+            return openai.LLM(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=os.getenv("GROQ_API_KEY"),
+                model=model,
                 temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
             )
-        if gemini_key:
-            logger.warning("[LLM] Google plugin unavailable — using Gemini OpenAI-compatible endpoint")
-            return openai.LLM(
-                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-                api_key=gemini_key,
-                model=gemini_model,
-            )
-        logger.warning("[LLM] Google requested but no API key found — falling back to Groq")
+        return None
 
-    if provider == "openai":
+    def get_gemini():
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            env_model = os.getenv("GEMINI_MODEL", "").strip()
+            config_model = ws_config.llm_model.strip().lower()
+            gemini_model = (
+                env_model
+                or _GEMINI_CATALOG.get(config_model)
+                or (ws_config.llm_model if "gemini" in config_model else None)
+                or "gemini-2.5-flash-latest"
+            )
+            if _HAS_GOOGLE:
+                logger.info(f"[LLM] Added Google Gemini (native plugin) to fallback sequence — model={gemini_model}")
+                return google_plugin.LLM(
+                    model=gemini_model,
+                    api_key=gemini_key,
+                    temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
+                )
+            else:
+                logger.warning(f"[LLM] Added Google Gemini (OpenAI-compatible) to fallback sequence — model={gemini_model}")
+                return openai.LLM(
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                    api_key=gemini_key,
+                    model=gemini_model,
+                )
+        return None
+
+    def get_openai():
         openai_key = os.getenv("OPENAI_API_KEY")
         if openai_key:
-            model = os.getenv("OPENAI_MODEL", ws_config.llm_model)
-            logger.info(f"[LLM] OpenAI — model={model}")
-            return openai.LLM(
-                api_key=openai_key,
-                model=model,
-            )
-        logger.warning("[LLM] OpenAI requested but OPENAI_API_KEY not set — falling back to Groq")
+            model = os.getenv("OPENAI_MODEL", ws_config.llm_model if provider == "openai" else "gpt-4o-mini")
+            logger.info(f"[LLM] Added OpenAI to fallback sequence — model={model}")
+            return openai.LLM(api_key=openai_key, model=model)
+        return None
 
-    # Last-resort fallback: Groq
-    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    logger.info(f"[LLM] Groq (last-resort fallback) — model={model}")
-    return openai.LLM(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY"),
-        model=model,
-        temperature=float(os.getenv("GROQ_TEMPERATURE", str(ws_config.llm_temperature))),
-    )
+    logger.info(f"[LLM] Primary provider configured as: {provider}")
+
+    if provider == "groq":
+        llms = [get_groq(), get_gemini(), get_openai()]
+    elif provider in ("google", "gemini"):
+        llms = [get_gemini(), get_groq(), get_openai()]
+    elif provider == "openai":
+        llms = [get_openai(), get_gemini(), get_groq()]
+    else:
+        llms = [get_gemini(), get_groq(), get_openai()]
+
+    llm_sequence = [l for l in llms if l is not None]
+
+    if not llm_sequence:
+        logger.warning("[LLM] No providers configured! Using Groq as last resort.")
+        llm_sequence.append(
+            openai.LLM(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=os.getenv("GROQ_API_KEY", ""),
+                model="llama-3.3-70b-versatile",
+            )
+        )
+
+    logger.info(f"[LLM] FallbackAdapter built with sequence of {len(llm_sequence)} LLMs.")
+    return llm.FallbackAdapter(llms=llm_sequence)
 
 
 # =============================================================================

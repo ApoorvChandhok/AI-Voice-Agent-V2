@@ -86,7 +86,7 @@ export async function getCallLogs() {
         if (matchedLocalLogIndices.has(index)) return;
         
         const logPhone = log.phone_number?.replace("+", "");
-        if (logPhone === normalizedDest || logPhone === normalizedCaller) {
+        if (logPhone === normalizedDest || logPhone === normalizedCaller || logPhone === "inbound_caller") {
           const logTime = new Date(log.timestamp).getTime();
           const diff = Math.abs(logTime - cdrTime);
           if (diff < minTimeDiff && diff < 1000 * 60 * 60) { // within 1 hour
@@ -124,6 +124,7 @@ export async function getCallLogs() {
         summary: summaryStr,
         sentiment: sentimentStr,
         caller_intent: intentStr,
+        user_info: localMatch?.user_info || cachedAnalysis?.lead_info || undefined,
         id: cdr.uuid,
         sip_call_id: cdr.sip_call_id,
         timestamp: cdr.start_time || localMatch?.timestamp || new Date().toISOString(),
@@ -181,10 +182,16 @@ export async function getCallLogs() {
       const logPhone = (log.caller_number || log.caller_id || log.phone_number || "").replace("+", "");
       
       const existingIdx = finalLogs.findIndex(l => {
+        if (log.sip_call_id && l.sip_call_id) {
+          return log.sip_call_id === l.sip_call_id;
+        }
+        
         const lPhone = (l.caller_number || l.caller_id || l.phone_number || "").replace("+", "");
         if (!logPhone || !lPhone || lPhone !== logPhone) return false;
+        if (logPhone === "inbound_caller") return false; // Avoid merging separate anonymous inbound calls
+        
         const lTime = new Date(l.timestamp).getTime();
-        return Math.abs(lTime - logTime) < 1000 * 60 * 60; // 1 hour proximity
+        return Math.abs(lTime - logTime) < 1000 * 60 * 2; // 2 minutes proximity instead of 1 hour
       });
       
       if (existingIdx >= 0) {
@@ -293,7 +300,7 @@ function parseLeadsCsv(): { timestamp: string; name: string; phone: string; city
         phone: parts[2] || "",
         city: parts[3] || "",
       };
-    });
+    }).filter(lead => lead.phone && lead.phone !== "inbound_caller");
   } catch {
     return [];
   }
@@ -320,11 +327,11 @@ export async function getLeads(): Promise<EnrichedLead[]> {
     allLogs.forEach((log: any) => {
       const phone = log.phone_number || log.caller_id || "";
       const normalizedPhone = phone.replace("+", "");
-      if (normalizedPhone && !csvPhones.has(normalizedPhone)) {
+      if (normalizedPhone && normalizedPhone !== "inbound_caller" && !csvPhones.has(normalizedPhone)) {
         csvPhones.add(normalizedPhone);
         const a = analysisCache[log.id] || analysisCache[log.sip_call_id];
-        const name = a?.lead_info?.name || `Caller ${phone}`;
-        const city = a?.lead_info?.city || "";
+        const name = a?.lead_info?.name || log.user_info?.name || `Caller ${phone}`;
+        const city = a?.lead_info?.city || log.user_info?.city || "";
         
         csvLeads.push({
           timestamp: log.timestamp,
