@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Activity, Play, Clock, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import Link from "next/link";
 
