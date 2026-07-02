@@ -67,7 +67,7 @@ export async function getCallLogs() {
     }
     
     // 3. Merge Local Logs and Vobiz CDRs
-    let mergedLogs: any[] = [];
+    const mergedLogs: any[] = [];
     
     const matchedLocalLogIndices = new Set<number>();
 
@@ -86,7 +86,7 @@ export async function getCallLogs() {
         if (matchedLocalLogIndices.has(index)) return;
         
         const logPhone = log.phone_number?.replace("+", "");
-        if (logPhone === normalizedDest || logPhone === normalizedCaller) {
+        if (logPhone === normalizedDest || logPhone === normalizedCaller || logPhone === "inbound_caller") {
           const logTime = new Date(log.timestamp).getTime();
           const diff = Math.abs(logTime - cdrTime);
           if (diff < minTimeDiff && diff < 1000 * 60 * 60) { // within 1 hour
@@ -124,6 +124,7 @@ export async function getCallLogs() {
         summary: summaryStr,
         sentiment: sentimentStr,
         caller_intent: intentStr,
+        user_info: localMatch?.user_info || cachedAnalysis?.lead_info || undefined,
         id: cdr.uuid,
         sip_call_id: cdr.sip_call_id,
         timestamp: cdr.start_time || localMatch?.timestamp || new Date().toISOString(),
@@ -170,9 +171,57 @@ export async function getCallLogs() {
       }
     });
 
-    // Sort newest first by timestamp
-    mergedLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return mergedLogs;
+    // Deduplicate mergedLogs based on phone number and timestamp proximity (within 1 hour)
+    const finalLogs: any[] = [];
+    
+    // Sort chronologically first to process in order
+    mergedLogs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    
+    mergedLogs.forEach(log => {
+      const logTime = new Date(log.timestamp).getTime();
+      const logPhone = (log.caller_number || log.caller_id || log.phone_number || "").replace("+", "");
+      
+      const existingIdx = finalLogs.findIndex(l => {
+        if (log.sip_call_id && l.sip_call_id) {
+          return log.sip_call_id === l.sip_call_id;
+        }
+        
+        const lPhone = (l.caller_number || l.caller_id || l.phone_number || "").replace("+", "");
+        if (!logPhone || !lPhone || lPhone !== logPhone) return false;
+        if (logPhone === "inbound_caller") return false; // Avoid merging separate anonymous inbound calls
+        
+        const lTime = new Date(l.timestamp).getTime();
+        return Math.abs(lTime - logTime) < 1000 * 60 * 2; // 2 minutes proximity instead of 1 hour
+      });
+      
+      if (existingIdx >= 0) {
+        // Merge the two logs: keep the one with longer duration, but sum up the costs
+        const existing = finalLogs[existingIdx];
+        if ((log.duration || 0) > (existing.duration || 0)) {
+          finalLogs[existingIdx] = {
+            ...existing,
+            ...log, // log overrides existing
+            cost: (existing.cost || 0) + (log.cost || 0),
+            recording_cost: (existing.recording_cost || 0) + (log.recording_cost || 0),
+            transcription_cost: (existing.transcription_cost || 0) + (log.transcription_cost || 0),
+            ncc_cost: (existing.ncc_cost || 0) + (log.ncc_cost || 0),
+            did_cost: (existing.did_cost || 0) + (log.did_cost || 0),
+          };
+        } else {
+          existing.cost = (existing.cost || 0) + (log.cost || 0);
+          existing.recording_cost = (existing.recording_cost || 0) + (log.recording_cost || 0);
+          existing.transcription_cost = (existing.transcription_cost || 0) + (log.transcription_cost || 0);
+          existing.ncc_cost = (existing.ncc_cost || 0) + (log.ncc_cost || 0);
+          existing.did_cost = (existing.did_cost || 0) + (log.did_cost || 0);
+        }
+      } else {
+        finalLogs.push(log);
+      }
+    });
+
+    // Sort newest first by timestamp for the final output
+    finalLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return finalLogs;
   } catch (error) {
     console.error("Error reading call logs:", error);
     return [];
@@ -251,7 +300,7 @@ function parseLeadsCsv(): { timestamp: string; name: string; phone: string; city
         phone: parts[2] || "",
         city: parts[3] || "",
       };
-    });
+    }).filter(lead => lead.phone && lead.phone !== "inbound_caller");
   } catch {
     return [];
   }
@@ -262,13 +311,8 @@ export async function getLeads(): Promise<EnrichedLead[]> {
     const csvLeads = parseLeadsCsv();
     const meta = readLeadsMeta();
 
-    // Cross-reference call logs for sentiment, intent, call count
-    let callLogs: any[] = [];
-    try {
-      if (fs.existsSync(LOGS_FILE)) {
-        callLogs = JSON.parse(fs.readFileSync(LOGS_FILE, "utf-8"));
-      }
-    } catch { /* ignore */ }
+    // Cross-reference call logs for sentiment, intent, call count using all merged logs (Vobiz + Local)
+    const allLogs = await getCallLogs();
 
     let analysisCache: Record<string, any> = {};
     try {
@@ -276,22 +320,47 @@ export async function getLeads(): Promise<EnrichedLead[]> {
         analysisCache = JSON.parse(fs.readFileSync(ANALYSIS_CACHE_FILE, "utf-8"));
       }
     } catch { /* ignore */ }
+    
+    const csvPhones = new Set(csvLeads.map(l => (l.phone || "").replace("+", "")));
+
+    // Auto-create leads for callers found in logs but not in the CSV
+    allLogs.forEach((log: any) => {
+      const phone = log.phone_number || log.caller_id || "";
+      const normalizedPhone = phone.replace("+", "");
+      if (normalizedPhone && normalizedPhone !== "inbound_caller" && !csvPhones.has(normalizedPhone)) {
+        csvPhones.add(normalizedPhone);
+        const a = analysisCache[log.id] || analysisCache[log.sip_call_id];
+        const name = a?.lead_info?.name || log.user_info?.name || `Caller ${phone}`;
+        const city = a?.lead_info?.city || log.user_info?.city || "";
+        
+        csvLeads.push({
+          timestamp: log.timestamp,
+          name,
+          phone,
+          city
+        });
+      }
+    });
 
     const enriched: EnrichedLead[] = csvLeads.map((lead) => {
       const m = meta[lead.phone] || {};
 
       // Find matching call logs
-      const matchingCalls = callLogs.filter((log: any) =>
-        log.phone_number?.replace("+", "").includes(lead.phone.replace("+", "")) ||
-        lead.phone.replace("+", "").includes(log.phone_number?.replace("+", "") || "__none__")
+      const matchingCalls = allLogs.filter((log: any) =>
+        log.phone_number?.replace("+", "") === lead.phone.replace("+", "") ||
+        lead.phone.replace("+", "") === (log.phone_number?.replace("+", "") || "__none__")
       );
 
-      // Find sentiment from analysis cache
+      // Find sentiment and intent from analysis cache
       let sentiment = "";
       let callerIntent = "";
       for (const [, analysis] of Object.entries(analysisCache)) {
         const a = analysis as any;
-        if (a?.lead_info?.name?.toLowerCase() === lead.name?.toLowerCase()) {
+        if (a?.lead_info?.phone && a.lead_info.phone.replace("+", "") === lead.phone.replace("+", "")) {
+          sentiment = a.sentiment || "";
+          callerIntent = a.lead_info?.intent || "";
+          break;
+        } else if (a?.lead_info?.name?.toLowerCase() === lead.name?.toLowerCase() && lead.name !== `Caller ${lead.phone}`) {
           sentiment = a.sentiment || "";
           callerIntent = a.lead_info?.intent || "";
           break;
@@ -300,7 +369,7 @@ export async function getLeads(): Promise<EnrichedLead[]> {
 
       // Also check matching calls for sentiment
       if (!sentiment && matchingCalls.length > 0) {
-        const latestCall = matchingCalls[matchingCalls.length - 1];
+        const latestCall = matchingCalls[0]; // because getCallLogs is sorted newest first
         sentiment = latestCall.sentiment || "";
         callerIntent = callerIntent || latestCall.caller_intent || "";
       }
@@ -668,7 +737,7 @@ export async function getWalletData(): Promise<WalletData> {
     }
 
     // ── 3. Parse billing ledger into typed transactions
-    let transactions: WalletTransaction[] = allBillingItems.map((item: any, idx: number) => ({
+    const transactions: WalletTransaction[] = allBillingItems.map((item: any, idx: number) => ({
       id: item.id ?? item.uuid ?? String(idx),
       description: item.description ?? item.description_text ?? item.memo ?? 'Charge',
       amount: -(Math.abs(parseFloat(item.amount ?? item.cost ?? item.debit ?? '0'))),
@@ -753,6 +822,7 @@ export async function getWalletData(): Promise<WalletData> {
 
 async function fetchAllVobizCdrs(authId: string, headers: any): Promise<any[]> {
   const allCdrs: any[] = [];
+  const seenIds = new Set<string>();
   let offset = 0;
   let hasMore = true;
   let pageCount = 0;
@@ -763,10 +833,25 @@ async function fetchAllVobizCdrs(authId: string, headers: any): Promise<any[]> {
       if (res.ok) {
         const json = await res.json();
         if (json?.success && json?.data && json.data.length > 0) {
-          allCdrs.push(...json.data);
-          offset += json.data.length;
-          pageCount++;
-          if (json.data.length < 100) hasMore = false;
+          let newItemsCount = 0;
+          for (const item of json.data) {
+            const id = item.uuid || item.sip_call_id || item.id;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              allCdrs.push(item);
+              newItemsCount++;
+            } else if (!id) {
+              allCdrs.push(item);
+              newItemsCount++;
+            }
+          }
+          if (newItemsCount === 0) {
+            hasMore = false;
+          } else {
+            offset += json.data.length;
+            pageCount++;
+            if (json.data.length < 100) hasMore = false;
+          }
         } else {
           hasMore = false;
         }
@@ -783,6 +868,7 @@ async function fetchAllVobizCdrs(authId: string, headers: any): Promise<any[]> {
 
 async function fetchAllVobizTranscripts(authId: string, headers: any): Promise<any[]> {
   const allTranscripts: any[] = [];
+  const seenIds = new Set<string>();
   let offset = 0;
   let hasMore = true;
   let pageCount = 0;
@@ -794,10 +880,25 @@ async function fetchAllVobizTranscripts(authId: string, headers: any): Promise<a
         const json = await res.json();
         const items = json?.objects ?? json?.data ?? json?.results ?? [];
         if (items.length > 0) {
-          allTranscripts.push(...items);
-          offset += items.length;
-          pageCount++;
-          if (items.length < 100) hasMore = false;
+          let newItemsCount = 0;
+          for (const item of items) {
+            const id = item.uuid || item.id || item.call_uuid;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              allTranscripts.push(item);
+              newItemsCount++;
+            } else if (!id) {
+              allTranscripts.push(item);
+              newItemsCount++;
+            }
+          }
+          if (newItemsCount === 0) {
+            hasMore = false;
+          } else {
+            offset += items.length;
+            pageCount++;
+            if (items.length < 100) hasMore = false;
+          }
         } else {
           hasMore = false;
         }
@@ -814,6 +915,7 @@ async function fetchAllVobizTranscripts(authId: string, headers: any): Promise<a
 
 async function fetchAllVobizRecordings(authId: string, headers: any): Promise<any[]> {
   const allRecordings: any[] = [];
+  const seenIds = new Set<string>();
   let offset = 0;
   let hasMore = true;
   let pageCount = 0;
@@ -825,10 +927,25 @@ async function fetchAllVobizRecordings(authId: string, headers: any): Promise<an
         const json = await res.json();
         const items = json?.objects ?? json?.data ?? json?.results ?? [];
         if (items.length > 0) {
-          allRecordings.push(...items);
-          offset += items.length;
-          pageCount++;
-          if (items.length < 100) hasMore = false;
+          let newItemsCount = 0;
+          for (const item of items) {
+            const id = item.uuid || item.id || item.call_uuid;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              allRecordings.push(item);
+              newItemsCount++;
+            } else if (!id) {
+              allRecordings.push(item);
+              newItemsCount++;
+            }
+          }
+          if (newItemsCount === 0) {
+            hasMore = false;
+          } else {
+            offset += items.length;
+            pageCount++;
+            if (items.length < 100) hasMore = false;
+          }
         } else {
           hasMore = false;
         }
@@ -845,6 +962,7 @@ async function fetchAllVobizRecordings(authId: string, headers: any): Promise<an
 
 async function fetchAllVobizBilling(authId: string, headers: any): Promise<any[]> {
   const allBilling: any[] = [];
+  const seenIds = new Set<string>();
   let offset = 0;
   let hasMore = true;
   let pageCount = 0;
@@ -856,10 +974,25 @@ async function fetchAllVobizBilling(authId: string, headers: any): Promise<any[]
         const json = await res.json();
         const items = json?.objects ?? json?.data ?? json?.results ?? [];
         if (items.length > 0) {
-          allBilling.push(...items);
-          offset += items.length;
-          pageCount++;
-          if (items.length < 100) hasMore = false;
+          let newItemsCount = 0;
+          for (const item of items) {
+            const id = item.uuid || item.id;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              allBilling.push(item);
+              newItemsCount++;
+            } else if (!id) {
+              allBilling.push(item);
+              newItemsCount++;
+            }
+          }
+          if (newItemsCount === 0) {
+            hasMore = false;
+          } else {
+            offset += items.length;
+            pageCount++;
+            if (items.length < 100) hasMore = false;
+          }
         } else {
           hasMore = false;
         }

@@ -60,7 +60,7 @@ export async function GET() {
   // ── Fallback: direct call_logs aggregate (if view returns nothing) ──────────
   // The view only returns rows for businesses WITH calls in the past 7 days.
   // If spends is empty/null we pull a direct count per business.
-  let directCounts: Record<string, { total_calls: number; total_minutes: number; total_spend_usd: number; inbound_calls: number; outbound_calls: number }> = {}
+  const directCounts: Record<string, { total_calls: number; total_minutes: number; total_spend_usd: number; inbound_calls: number; outbound_calls: number }> = {}
 
   if (!spends || spends.length === 0) {
     const { data: callData } = await supabase

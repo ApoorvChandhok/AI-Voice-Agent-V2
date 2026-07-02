@@ -12,14 +12,36 @@ function formatCostINR(cost: string | number | undefined): string {
   return `₹${inr.toFixed(2)}`;
 }
 
-function getCallerNumber(log: any): string {
+export interface CallLog {
+  id?: string;
+  caller_number?: string;
+  caller_id?: string;
+  phone_number?: string;
+  timestamp: string | number;
+  status?: string;
+  direction?: string;
+  mode?: string;
+  cost?: string | number;
+  duration?: number | string;
+  mos?: number | string;
+  sentiment?: string;
+  recording_path?: string;
+  sip_call_id?: string;
+  user_info?: Record<string, string | number | boolean>;
+  caller_intent?: string;
+  summary?: string;
+  transcript?: string;
+  [key: string]: unknown;
+}
+
+function getCallerNumber(log: CallLog): string {
   if (log.caller_number) return log.caller_number;
   if (log.caller_id && log.caller_id.replace("+", "") !== AGENT_DID) return log.caller_id;
   if (log.phone_number && log.phone_number.replace("+", "") !== AGENT_DID) return log.phone_number;
   return log.phone_number || "Unknown";
 }
 
-export default function CallLogsTable({ logs }: { logs: any[] }) {
+export default function CallLogsTable({ logs }: { logs: CallLog[] }) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const toggleRow = (id: string) => {
@@ -40,20 +62,19 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
         <table className="w-full text-sm text-left">
           <thead className="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50/80 dark:bg-white/[0.02] border-b border-gray-200/50 dark:border-white/5">
             <tr>
-              <th className="px-4 py-4 w-10"></th>
               <th className="px-4 py-4 font-medium tracking-wider">Timestamp</th>
               <th className="px-4 py-4 font-medium tracking-wider">Status &amp; Mode</th>
               <th className="px-4 py-4 font-medium tracking-wider">Caller Details</th>
-              <th className="px-4 py-4 font-medium tracking-wider max-w-[200px]">What is said</th>
               <th className="px-4 py-4 font-medium tracking-wider">Metrics</th>
               <th className="px-4 py-4 font-medium tracking-wider">Sentiment</th>
               <th className="px-4 py-4 font-medium tracking-wider">Recording</th>
+              <th className="px-4 py-4 font-medium tracking-wider text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100/80 dark:divide-white/5">
             {logs.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-16 text-center text-gray-400 dark:text-[#8b949e]">
+                <td colSpan={7} className="px-6 py-16 text-center text-gray-400 dark:text-[#8b949e]">
                   <div className="flex flex-col items-center justify-center">
                     <Activity className="w-8 h-8 mb-3 text-gray-200 dark:text-[#30363d]" />
                     No calls logged yet. Complete a call to generate analytics.
@@ -61,30 +82,22 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
                 </td>
               </tr>
             ) : (
-              logs.map((log: any, idx: number) => {
+              logs.map((log: CallLog, idx: number) => {
                 const isPositive = log.sentiment?.toLowerCase().includes("positive");
                 const isNegative = log.sentiment?.toLowerCase().includes("negative");
                 const callerNumber = getCallerNumber(log);
                 const costDisplay = formatCostINR(log.cost);
                 const hasRecording = !!(log.recording_path || log.sip_call_id);
-                const isExpanded = expandedRows.has(log.id || String(idx));
+                const uniqueKey = log.id ? `${log.id}-${idx}` : String(idx);
+                const isExpanded = expandedRows.has(uniqueKey);
                 
                 const userName = log.user_info?.name || "Unknown Caller";
-                const whatIsSaid = log.caller_intent || log.summary || "No details available.";
 
                 return (
-                  <React.Fragment key={log.id || idx}>
-                    <tr 
-                      className={`hover:bg-gray-50 dark:hover:bg-[#21262d] transition-colors group cursor-pointer ${isExpanded ? 'bg-gray-50 dark:bg-[#21262d]' : ''}`}
-                      onClick={() => toggleRow(log.id || String(idx))}
-                    >
-                      <td className="px-4 py-4">
-                        <button className="text-gray-400 hover:text-gray-700 dark:text-[#8b949e] dark:hover:text-white transition-colors">
-                          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                        </button>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-gray-800 dark:text-[#e6edf3]">
-                        {new Date(log.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  <React.Fragment key={uniqueKey}>
+                    <tr className={`hover:bg-gray-50 dark:hover:bg-[#21262d] transition-colors group ${isExpanded ? 'bg-gray-50 dark:bg-[#21262d]' : ''}`}>
+                      <td suppressHydrationWarning className="px-4 py-4 whitespace-nowrap text-gray-800 dark:text-[#e6edf3]">
+                        {new Date(log.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
                         <div className="flex flex-col gap-1">
@@ -105,11 +118,6 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
                         <div className="flex flex-col">
                           <span className="font-medium text-gray-900 dark:text-white">{userName}</span>
                           <span className="text-gray-500 dark:text-[#8b949e] text-xs mt-0.5">{callerNumber}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="text-xs text-gray-600 dark:text-[#8b949e] line-clamp-2 max-w-[250px]" title={whatIsSaid}>
-                          {whatIsSaid}
                         </div>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
@@ -134,7 +142,6 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
                         {hasRecording ? (
                           <Link
                             href={`/logs/${log.id}`}
-                            onClick={(e) => e.stopPropagation()}
                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-600 dark:text-[#2f81f7] bg-blue-50 dark:bg-[#2f81f7]/10 border border-blue-200 dark:border-[#2f81f7]/20 rounded-md hover:bg-blue-100 dark:hover:bg-[#2f81f7]/20 transition-colors"
                           >
                             <Clock className="w-3.5 h-3.5" />
@@ -144,41 +151,94 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
                           <span className="text-gray-300 dark:text-[#30363d] text-xs">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Link
+                            href={`/logs/${log.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-[#21262d] border border-gray-200 dark:border-white/10 rounded-md hover:bg-gray-50 dark:hover:bg-[#30363d] transition-colors shadow-sm"
+                          >
+                            View
+                          </Link>
+                          <button 
+                            onClick={() => toggleRow(uniqueKey)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors shadow-sm ${
+                              isExpanded 
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-[#2f81f7]/10 dark:text-[#2f81f7] dark:border-[#2f81f7]/30' 
+                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 dark:bg-[#21262d] dark:text-gray-200 dark:border-white/10 dark:hover:bg-[#30363d]'
+                            }`}
+                            title="Expand extracted data"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            Extracts
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5 ml-0.5" /> : <ChevronDown className="w-3.5 h-3.5 ml-0.5" />}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                     
                     {/* Expanded Details Row */}
                     {isExpanded && (
                       <tr className="bg-gray-50/50 dark:bg-[#21262d]/50 border-b border-gray-100 dark:border-white/5">
-                        <td colSpan={8} className="px-8 py-6">
+                        <td colSpan={7} className="px-8 py-6">
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             
                             {/* Left Col: Analysis & Summary */}
                             <div className="space-y-4">
-                              <div>
-                                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                                  <FileText className="w-4 h-4 text-gray-500" />
-                                  Call Summary
-                                </h4>
-                                <p className="text-sm text-gray-600 dark:text-[#8b949e] bg-white dark:bg-[#161b22] p-3 rounded-lg border border-gray-200/50 dark:border-white/5 shadow-sm">
-                                  {log.summary || "No summary available."}
-                                </p>
-                              </div>
-                              
-                              {Object.keys(log.user_info || {}).length > 0 && (
-                                <div>
-                                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Extracted Information</h4>
-                                  <div className="bg-white dark:bg-[#161b22] p-3 rounded-lg border border-gray-200/50 dark:border-white/5 shadow-sm">
-                                    <dl className="space-y-2">
-                                      {Object.entries(log.user_info).map(([key, value]) => (
-                                        <div key={key} className="grid grid-cols-3 gap-2">
-                                          <dt className="text-xs font-medium text-gray-500 dark:text-[#8b949e] capitalize">{key.replace(/_/g, ' ')}</dt>
-                                          <dd className="text-xs text-gray-900 dark:text-[#e6edf3] col-span-2">{String(value || '-')}</dd>
-                                        </div>
-                                      ))}
-                                    </dl>
+                              {(() => {
+                                const extractedData: Record<string, any> = { ...log.user_info };
+                                
+                                // Clean up repeated standard fields
+                                const ignoreKeys = ['name', 'first_name', 'last_name', 'phone', 'email', 'phone_number'];
+                                ignoreKeys.forEach(k => {
+                                  if (extractedData[k]) delete extractedData[k];
+                                });
+
+                                if (log.caller_intent) extractedData["Caller Intent"] = log.caller_intent;
+                                if (log.summary && log.summary !== "Summary generated locally or missing.") {
+                                  extractedData["Call Summary"] = log.summary;
+                                } else if (log.transcript && log.transcript.length > 0) {
+                                  // Suggest that transcript exists but isn't analyzed yet
+                                  extractedData["Call Summary"] = "Analysis pending (transcript available).";
+                                }
+                                
+                                const hasExtractedData = Object.keys(extractedData).length > 0;
+
+                                return hasExtractedData ? (
+                                  <div>
+                                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                                      <FileText className="w-4 h-4 text-gray-500" />
+                                      Extracted Information
+                                    </h4>
+                                    <div className="bg-white dark:bg-[#161b22] rounded-lg border border-gray-200/50 dark:border-white/5 shadow-sm overflow-hidden">
+                                      <table className="w-full text-left text-xs">
+                                        <tbody className="divide-y divide-gray-100 dark:divide-white/5">
+                                          {Object.entries(extractedData).map(([key, value]) => (
+                                            <tr key={key} className="hover:bg-gray-50 dark:hover:bg-[#21262d] transition-colors">
+                                              <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-[#8b949e] capitalize w-1/3 bg-gray-50/50 dark:bg-white/[0.02]">
+                                                {key.replace(/_/g, ' ')}
+                                              </th>
+                                              <td className="px-4 py-2.5 text-gray-900 dark:text-[#e6edf3] whitespace-pre-wrap break-words">
+                                                {String(value || '-')}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                ) : (
+                                  <div>
+                                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                                      <FileText className="w-4 h-4 text-gray-500" />
+                                      Extracted Information
+                                    </h4>
+                                    <div className="bg-white dark:bg-[#161b22] p-4 rounded-lg border border-gray-200/50 dark:border-white/5 shadow-sm flex flex-col items-center justify-center text-xs text-gray-500 dark:text-[#8b949e]">
+                                      <span>No extracted information available for this call.</span>
+                                      {log.transcript && <span className="mt-1">Click "View" to generate analysis dynamically.</span>}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                               
                               <div className="pt-2">
                                 <Link
@@ -232,3 +292,4 @@ export default function CallLogsTable({ logs }: { logs: any[] }) {
     </div>
   );
 }
+

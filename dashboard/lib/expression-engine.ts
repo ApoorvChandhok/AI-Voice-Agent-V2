@@ -49,7 +49,7 @@ export function resolveExpression(expr: string, ctx: ExpressionContext): any {
     // Use Function constructor for safe evaluation (no access to outer scope)
     const keys = Object.keys(scope);
     const values = Object.values(scope);
-    // eslint-disable-next-line no-new-func
+     
     const fn = new Function(...keys, `"use strict"; return (${inner});`);
     return fn(...values);
   } catch {
@@ -194,7 +194,7 @@ export function executeCodeNode(
 
     const $json = Array.isArray(inputData) ? (inputData[0] ?? {}) : (inputData ?? {});
 
-    // eslint-disable-next-line no-new-func
+     
     const fn = new Function("$input", "$json", `"use strict";\n${code}`);
     const result = fn($input, $json);
     const executionMs = Math.round(performance.now() - start);
